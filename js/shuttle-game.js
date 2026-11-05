@@ -3401,7 +3401,7 @@
   // ---------- Explicit host/join PeerJS relay for static deployments ----------
   // The host claims the room-code ID. Joiners only connect to that ID; they never
   // silently create a second room when a code is mistyped or the host is absent.
-  const star = { peer: null, role: null, hostConn: null, guests: new Map(), settled: false };
+  const star = { peer: null, role: null, hostConn: null, guests: new Map(), settled: false, joinTimer: 0 };
 
   function loadPeerJs(cb) {
     if (window.Peer) { cb(true); return; }
@@ -3471,6 +3471,8 @@
     star.settled = false;
     const hostId = 'iiser-drive-' + room;
     const showError = (message) => {
+      if (star.joinTimer) clearTimeout(star.joinTimer);
+      star.joinTimer = 0;
       star.settled = true;
       mp.transport = 'error';
       mp.status = message;
@@ -3549,6 +3551,8 @@
       let connected = false;
       const retryRoomLookup = () => {
         if (!mp.enabled || star.peer !== peer || connected || mp.transport === 'error' || retryTimer) return;
+        if (star.joinTimer) clearTimeout(star.joinTimer);
+        star.joinTimer = 0;
         if (joinAttempts >= 8) {
           showError('No active host for code ' + mp.room + '. Keep the host’s game open until it says “room created”, then try Join room again.');
           return;
@@ -3574,6 +3578,8 @@
         mpStatusUpdate();
         conn.on('open', () => {
           connected = true;
+          if (star.joinTimer) clearTimeout(star.joinTimer);
+          star.joinTimer = 0;
           if (retryTimer) clearTimeout(retryTimer);
           retryTimer = 0;
           star.settled = true;
@@ -3591,9 +3597,15 @@
         });
         conn.on('error', (err) => {
           if (!connected && err && err.type === 'peer-unavailable') retryRoomLookup();
-          else if (mp.enabled && !connected) showError('Could not connect to PeerJS signaling. Check the connection and try again.');
+          else if (mp.enabled && !connected) showError('The host was found, but the direct connection failed. Try again; if it keeps failing, this network may need a relay.');
           else if (mp.enabled) showError('Direct connection failed. This network may block peer traffic; try another network.');
         });
+        star.joinTimer = setTimeout(() => {
+          star.joinTimer = 0;
+          if (!mp.enabled || star.peer !== peer || connected) return;
+          showError('The host was found, but the direct connection timed out. Keep the host open and try again; some networks require a relay.');
+          try { conn.close(); } catch (_) {}
+        }, 12000);
       };
 
       peer.on('open', () => {
@@ -3622,6 +3634,8 @@
   }
 
   function teardownStar() {
+    if (star.joinTimer) clearTimeout(star.joinTimer);
+    star.joinTimer = 0;
     try { for (const [, conn] of star.guests) { try { conn.close(); } catch (_) {} } } catch (_) {}
     if (star.hostConn) { try { star.hostConn.close(); } catch (_) {} }
     if (star.peer) { try { star.peer.destroy(); } catch (_) {} }
