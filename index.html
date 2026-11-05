@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="theme-color" content="#0b1210">
+<title>IISER Vithura — Campus Drive · Shuttle &amp; Buggy Game</title>
+<meta name="description" content="Drive a real-scale IISER Vithura campus: GLB shuttle buses, open buggies, shuttle routes, time trials, traffic and 8-player co-op in the Western Ghats.">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body class="labels-key">
+<div id="scene-host"></div>
+<div id="labels" aria-hidden="false"></div>
+<div id="vignette"></div>
+
+<header class="title-card">
+  <div class="eyebrow"><span class="mark"></span> IISER VITHURA · CAMPUS DRIVE</div>
+  <h1>Shuttle &amp; Buggy</h1>
+  <p class="subtitle">Drive a real-scale Western Ghats campus — shuttle routes, buggy trails and multiplayer cruises</p>
+  <div class="meta-line">
+    <span>6 game modes</span><span>8-player co-op</span><span>GLB fleet</span>
+  </div>
+</header>
+
+<nav id="panel" class="panel game-menu" aria-label="Campus Drive menu">
+  <div class="menu-brand">
+    <div class="kicker"><span class="mark"></span> Campus Drive</div>
+    <div class="menu-title">Shuttle <span>&amp;</span> Buggy</div>
+  </div>
+  <div class="menu-tabs" role="tablist" aria-label="Menu tabs">
+    <button class="menu-tab on" data-menu-tab="drive" role="tab" aria-selected="true" type="button">Drive</button>
+    <button class="menu-tab" data-menu-tab="map" role="tab" aria-selected="false" type="button">Map</button>
+  </div>
+
+  <section class="menu-page page-drive" id="page-drive" role="tabpanel" aria-label="Game modes">
+    <button class="btn primary wide drive-start-big" id="drive-start" type="button">
+      <span class="ds-main">Start driving</span>
+      <span class="ds-sub">Drop into the driver's seat</span>
+    </button>
+    <div class="kicker menu-label">Vehicle</div>
+    <div class="veh-cards" id="vehicle-cards" role="radiogroup" aria-label="Vehicle">
+      <button class="veh-card on" data-vehicle="transit" role="radio" aria-checked="true" type="button">
+        <span class="veh-icon veh-transit">T</span>
+        <span class="veh-name">City Transit</span>
+        <span class="veh-blurb">7.8 t · the standard campus shuttle</span>
+      </button>
+      <button class="veh-card" data-vehicle="coach" role="radio" aria-checked="false" type="button">
+        <span class="veh-icon veh-coach">C</span>
+        <span class="veh-name">Executive Coach</span>
+        <span class="veh-blurb">11.5 t · unstoppable highway cruiser</span>
+      </button>
+      <button class="veh-card" data-vehicle="college" role="radio" aria-checked="false" type="button">
+        <span class="veh-icon veh-college">CB</span>
+        <span class="veh-name">College Bus</span>
+        <span class="veh-blurb">6.2 t · light and nimble</span>
+      </button>
+      <button class="veh-card" data-vehicle="buggy" role="radio" aria-checked="false" type="button">
+        <span class="veh-icon veh-buggy">B</span>
+        <span class="veh-name">Open Buggy</span>
+        <span class="veh-blurb">1.15 t · off-road campus runabout</span>
+      </button>
+    </div>
+    <div class="kicker menu-label">Game modes</div>
+    <div class="mode-cards">
+      <button class="mode-card" data-game-mode="free" type="button">
+        <span class="mc-name">Free Drive</span>
+        <span class="mc-blurb">No rules — cruise the campus at your own pace</span>
+      </button>
+      <button class="mode-card" data-game-mode="route" type="button">
+        <span class="mc-name">Shuttle 101</span>
+        <span class="mc-blurb">8 stops, pick up students, run the full loop</span>
+      </button>
+      <button class="mode-card" data-game-mode="trial" type="button">
+        <span class="mc-name">Time Trial</span>
+        <span class="mc-blurb">Beat the clock — 8 checkpoints, best lap wins</span>
+      </button>
+      <button class="mode-card" data-game-mode="park" type="button">
+        <span class="mc-name">Precision Park</span>
+        <span class="mc-blurb">Thread the cones, park fully inside the bay</span>
+      </button>
+      <button class="mode-card" data-game-mode="safari" type="button">
+        <span class="mc-name">Buggy Safari</span>
+        <span class="mc-blurb">Off-road buggy trail to the hilltop checkpoints</span>
+      </button>
+      <button class="mode-card" data-game-mode="multi" type="button">
+        <span class="mc-name">Multiplayer</span>
+        <span class="mc-blurb">8 drivers, one room code — cruise together</span>
+      </button>
+    </div>
+    <div class="menu-foot">
+      <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> drive ·
+      <kbd>C</kbd> camera · <kbd>H</kbd> horn · <kbd>G</kbd> high beam · <kbd>B</kbd> hazards · <kbd>R</kbd> reset · <kbd>M</kbd> next mode · <kbd>Esc</kbd> exit
+    </div>
+  </section>
+
+  <section class="menu-page page-map hidden" id="page-map" role="tabpanel" aria-label="Map layers and views">
+    <div class="group">
+      <div class="kicker">Views</div>
+      <div class="view-grid">
+        <button class="btn" data-view="overview">Overview</button>
+        <button class="btn" data-view="academics">Academics</button>
+        <button class="btn" data-view="stadium">Stadium &amp; Lake</button>
+        <button class="btn" data-view="qpark">Q-Park</button>
+        <button class="btn" data-view="hostels">Hostels &amp; Rec</button>
+        <button class="btn" data-view="health">Health &amp; Shop</button>
+        <button class="btn" data-view="gate">Main gate</button>
+        <button class="btn" data-view="highway">SH-45 Hwy</button>
+        <button class="btn wide" data-view="west">West campus</button>
+      </div>
+    </div>
+    <div class="group">
+      <div class="kicker">Map Layers</div>
+      <button class="btn toggle" id="layer-labels"><span>Labels</span><em>Key</em></button>
+      <button class="btn toggle on" id="layer-trees"><span>Tree canopy</span><em>On</em></button>
+      <button class="btn toggle" id="layer-boundary"><span>Campus boundary</span><em>Off</em></button>
+    </div>
+    <div class="group">
+      <div class="kicker">Performance &amp; Atmosphere</div>
+      <div class="perf-row">
+        <label class="perf-label" for="quality-select">Quality</label>
+        <select id="quality-select" class="mp-input perf-select">
+          <option value="auto">Auto</option>
+          <option value="low">Low · fastest</option>
+          <option value="medium">Medium</option>
+          <option value="high">High</option>
+        </select>
+      </div>
+      <button class="btn toggle" id="layer-fps"><span>FPS meter</span><em>Off</em></button>
+      <div class="perf-row">
+        <label class="perf-label" for="tod-select">Time of day</label>
+        <select id="tod-select" class="mp-input perf-select">
+          <option value="day">Daylight</option>
+          <option value="golden">Golden hour</option>
+          <option value="mist">Ghats mist</option>
+          <option value="night">Night</option>
+        </select>
+      </div>
+      <div class="perf-hint">Z / X cycle time of day · B boundary · T trees · L labels</div>
+    </div>
+  </section>
+</nav>
+
+<aside id="info" class="panel info hidden" aria-live="polite">
+  <button class="close" id="info-close" aria-label="Close">×</button>
+  <div class="kicker" id="info-kind">Building</div>
+  <h2 id="info-name">—</h2>
+  <div class="stats">
+    <div><span>Height</span><strong id="info-height">—</strong></div>
+    <div><span>Floors</span><strong id="info-floors">—</strong></div>
+    <div><span>Footprint</span><strong id="info-area">—</strong></div>
+    <div><span>Ground</span><strong id="info-elev">—</strong></div>
+  </div>
+  <p class="note" id="info-note">Approximate reconstruction from open map data. Heights are estimated.</p>
+  <div class="actions">
+    <button class="btn primary" id="info-fly">Fly here</button>
+    <button class="btn" id="info-dismiss">Dismiss</button>
+  </div>
+</aside>
+
+<div id="bottom-left">
+  <div class="readout panel" id="readout">
+    <span class="read-dot"></span>
+    <span id="readout-text">Drag to orbit · scroll to zoom</span>
+  </div>
+  <div class="minimap-card panel" id="minimap-card">
+    <canvas id="minimap" width="380" height="351" aria-label="Campus minimap"></canvas>
+    <span class="mini-n">N</span>
+    <span class="mini-tag">VITHURA</span>
+  </div>
+</div>
+
+<div id="bottom-center">
+  <div id="hint">Drag to orbit <span>·</span> right-drag to pan <span>·</span> scroll to zoom</div>
+  <div id="scalebar"><div class="scale-track"><i id="scale-line"></i></div><span id="scale-text">200 m</span></div>
+</div>
+
+<div id="attribution">
+  <button id="credits-open" class="credit-link">Data &amp; credits</button>
+  <span class="credit-text">IISER Vithura Campus Drive · Imagery © Esri · Map © OpenStreetMap contributors · Terrain © Mapzen / AWS</span>
+</div>
+
+<div id="loading">
+  <div class="load-inner">
+    <div class="load-eyebrow"><span class="mark"></span> IISER VITHURA · CAMPUS DRIVE</div>
+    <div class="load-title">Shuttle &amp; Buggy</div>
+    <div class="load-sub">Warming up the campus fleet</div>
+    <div class="load-bar"><i></i></div>
+    <div class="load-status" id="load-status">Reading terrain…</div>
+    <div class="load-foot">OpenStreetMap · Esri World Imagery · AWS Terrain Tiles</div>
+  </div>
+</div>
+
+<div id="modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+  <div class="modal-card panel">
+    <button class="close" id="modal-close" aria-label="Close">×</button>
+    <div class="kicker">About the game</div>
+    <h2 id="modal-title">IISER Vithura · Campus Drive</h2>
+    <p>A drivable, near-real-scale IISER TVM campus game at Vithura, Kerala — take out the GLB shuttle fleet or the open campus buggy across the 2026 mapped road network, playing fields, ponds and forested Western Ghats foothills. One scene unit equals one metre.</p>
+    <h3>Sources &amp; licensing</h3>
+    <ul>
+      <li><strong>Building footprints, roads, water, campus boundary</strong> — © OpenStreetMap contributors, ODbL 1.0.</li>
+      <li><strong>Satellite ground texture</strong> — Esri World Imagery (© Esri, Maxar, Earthstar Geographics and the GIS User Community). Used here for a non-commercial, educational visualization.</li>
+      <li><strong>Elevation</strong> — AWS Terrain Tiles / Mapzen terrarium, CC-BY 4.0.</li>
+      <li><strong>Campus context</strong> — IISER Thiruvananthapuram public campus information.</li>
+      <li><strong>3D Bus GLB Assets</strong> — Transit Bus by Nick Ladd, Coach Bus by Poly by Google, and School/College Bus via Poly Pizza (CC-BY).</li>
+    </ul>
+    <h3>Accuracy</h3>
+    <p>Footprints and positions are real map geometry. Building heights, floors and roof forms are estimates derived from OSM tags, footprint dimensions and the satellite view; the terrain is a smoothed 30 m elevation model. This is not a survey product and should not be used for navigation or planning.</p>
+    <h3>Controls</h3>
+    <p><strong>Drive:</strong> <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> or arrow keys · <kbd>Space</kbd> handbrake · <kbd>C</kbd> camera · <kbd>1</kbd>–<kbd>7</kbd> camera views · <kbd>H</kbd> horn · <kbd>F</kbd> lights · <kbd>G</kbd> high beam · <kbd>B</kbd> hazards · <kbd>R</kbd> reset · <kbd>M</kbd> next mode · <kbd>Esc</kbd> exit vehicle.</p>
+    <p><strong>Map:</strong> drag to orbit, right-drag (or shift-drag) to pan, scroll to zoom. Click a building for details. <kbd>L</kbd> labels · <kbd>T</kbd> trees · <kbd>B</kbd> boundary · <kbd>Z</kbd>/<kbd>X</kbd> time of day · <kbd>R</kbd> overview.</p>
+    <p><strong>Multiplayer:</strong> share the room code from the Multiplayer modal — everyone opening it joins the same session and sees each other's vehicles in-world. Every mode is playable in a room; the scoreboard tracks drivers per mode.</p>
+    <p class="credit-fine">Unofficial visualization, October 2026. OpenStreetMap snapshot 31 October 2026; Esri imagery and AWS terrain tiles retrieved 31 October 2026. Imagery remains the property of its providers.</p>
+  </div>
+</div>
+
+<div id="error" class="hidden"></div>
+
+<script src="js/three.min.js"></script>
+<script src="js/GLTFLoader.js"></script>
+<script src="data/bus-models.js"></script>
+<script src="data/campus-data.js"></script>
+<script src="data/satellite.js"></script>
+<script src="js/campus-landmarks.js"></script>
+<script src="js/unreal-fx.js"></script>
+<script src="js/app.js"></script>
+<script src="js/shuttle-game.js"></script>
+</body>
+</html>
