@@ -752,6 +752,7 @@
     }
 
     let lastSx = 1e9, lastSy = 1e9, lastSz = 1e9, lastSpan = -1;
+    const shadowClock = { last: 0 };
     function updateShadowCascade(focusPos, viewRadius) {
       // Dynamic shadow cascade frustum: ultra-crisp 6.5cm texels when driving at street level,
       // smoothly expanding to full campus coverage in aerial overview!
@@ -768,6 +769,13 @@
       if (Math.abs(sx - lastSx) < 0.01 && Math.abs(sz - lastSz) < 0.01 && Math.abs(sy - lastSy) < 0.01 && Math.abs(halfSpan - lastSpan) < 0.5) {
         return;
       }
+      // Rate-limit shadow re-renders to ~3.5 Hz while travelling; span changes force an immediate update
+      const nowMs = (typeof performance !== 'undefined') ? performance.now() : Date.now();
+      const spanChanged = Math.abs(halfSpan - lastSpan) >= Math.max(8, lastSpan * 0.12);
+      if (!spanChanged && nowMs - shadowClock.last < 280) {
+        return;
+      }
+      shadowClock.last = nowMs;
       lastSx = sx; lastSy = sy; lastSz = sz; lastSpan = halfSpan;
 
       const dist = Math.max(900, halfSpan * 1.9);

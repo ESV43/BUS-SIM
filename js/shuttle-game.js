@@ -426,6 +426,7 @@
     { id: '303', name: 'Route 303 · Western Hilltop Climb',      stops: [7, 9, 10, 11, 10, 8, 6] },
     { id: '404', name: 'Route 404 · SH-45 Vithura–Ponmudi Hwy',  stops: [0, 12, 13, 15, 13, 12, 14, 12, 1, 2] }
   ];
+  const ROUTE_COLORS = ['#ffc24b', '#3be8b0', '#c084fc', '#4ac6e8'];
 
   // --- 4B. SPEED CAMERAS ON CAMPUS SPINE & SH-45 (auto-fine when over the limit) ---
   const SPEED_CAMERAS = [
@@ -538,11 +539,164 @@
     game.nearSpeedCamera = anyNear;
   }
 
+  // --- 4C. CAMPUS FUEL & SERVICE STATION + EXTERIOR VITHURA FUEL STAND (refuel ₹2/L) ---
+  const FUEL_PRICE = 2; // ₹ per unit (≈1 litre)
+  const FUEL_ZONES = [
+    { x: 211.5, z: 449.0, name: 'IISER Campus Fuel & Service Station' },
+    { x: -126.0, z: 601.5, name: 'Vithura Fuel & KSRTC Stand' }
+  ];
+
+  function buildFuelStation() {
+    const fx = 211.5, fz = 449.0;
+    const fy = getSurfaceHeight(fx, fz);
+    const st = new T.Group();
+    st.position.set(fx, fy, fz);
+    st.rotation.y = 0.95;
+
+    const canopy = new T.Mesh(new T.BoxGeometry(7.2, 0.3, 5.0), iiserBlueMat);
+    canopy.position.y = 4.55; canopy.castShadow = true; canopy.receiveShadow = true;
+    const stripe = new T.Mesh(new T.BoxGeometry(7.26, 0.32, 0.95), iiserGoldMat);
+    stripe.position.y = 4.6;
+    st.add(canopy, stripe);
+    for (const [px, pz] of [[-3.15, -2.0], [3.15, -2.0], [-3.15, 2.0], [3.15, 2.0]]) {
+      const col = new T.Mesh(new T.CylinderGeometry(0.17, 0.2, 4.4, 10), concreteCleanMat);
+      col.position.set(px, 2.2, pz); col.castShadow = true;
+      st.add(col);
+    }
+    for (const px of [-1.75, 1.75]) {
+      const island = new T.Mesh(new T.BoxGeometry(1.8, 0.22, 1.05), concreteCleanMat);
+      island.position.set(px, 0.11, 0.25); island.castShadow = true; st.add(island);
+      const pump = new T.Mesh(new T.BoxGeometry(0.66, 1.18, 0.48),
+        new T.MeshStandardMaterial({ color: 0xf2f2ee, roughness: 0.4, metalness: 0.15 }));
+      pump.position.set(px, 0.81, 0.25); pump.castShadow = true; st.add(pump);
+      const band = new T.Mesh(new T.BoxGeometry(0.68, 0.2, 0.5), iiserBlueMat);
+      band.position.set(px, 1.16, 0.25); st.add(band);
+      const hose = new T.Mesh(new T.BoxGeometry(0.09, 0.52, 0.09), darkMetalMat);
+      hose.position.set(px + 0.34, 0.72, 0.25); st.add(hose);
+    }
+    const kiosk = new T.Mesh(new T.BoxGeometry(2.6, 2.25, 1.9),
+      new T.MeshStandardMaterial({ color: 0xe8e2d4, roughness: 0.72 }));
+    kiosk.position.set(0, 1.13, -1.45); kiosk.castShadow = true; kiosk.receiveShadow = true; st.add(kiosk);
+    const kioskGlass = new T.Mesh(new T.BoxGeometry(2.05, 0.82, 0.06), shelterGlassMat);
+    kioskGlass.position.set(0, 1.42, -0.48); st.add(kioskGlass);
+
+    // Pole sign with fare canvas
+    const pole = new T.Mesh(new T.CylinderGeometry(0.08, 0.1, 3.3, 8), darkMetalMat);
+    pole.position.set(4.35, 1.65, 0.1); pole.castShadow = true; st.add(pole);
+    const sc = document.createElement('canvas'); sc.width = 256; sc.height = 256;
+    const g = sc.getContext('2d');
+    g.fillStyle = '#f7b731'; g.fillRect(0, 0, 256, 256);
+    g.fillStyle = '#12294a'; g.fillRect(14, 14, 228, 228);
+    g.fillStyle = '#f7b731'; g.font = '800 44px system-ui, sans-serif'; g.textAlign = 'center';
+    g.fillText('IISER', 128, 78);
+    g.fillStyle = '#ffffff'; g.fillText('FUEL', 128, 128);
+    g.fillStyle = '#f7b731'; g.font = '800 52px system-ui, sans-serif';
+    g.fillText('₹ 2 / L', 128, 205);
+    const signTex = new T.CanvasTexture(sc);
+    signTex.encoding = T.sRGBEncoding;
+    const sign = new T.Mesh(new T.BoxGeometry(1.35, 1.35, 0.12),
+      new T.MeshStandardMaterial({ map: signTex, roughness: 0.45 }));
+    sign.position.set(4.35, 3.3, 0.1); st.add(sign);
+
+    worldProps.add(st);
+    const kioskW = localToWorldXZ(fx, fz, 0.95, 0, -1.45);
+    solidObstacles.push({ kind: 'obb', cx: kioskW.x, cz: kioskW.z, hx: 1.45, hz: 1.1, yaw: 0.95, label: 'Fuel Kiosk' });
+    for (const px of [-1.75, 1.75]) {
+      const w = localToWorldXZ(fx, fz, 0.95, px, 0.25);
+      solidObstacles.push({ kind: 'obb', cx: w.x, cz: w.z, hx: 0.95, hz: 0.6, yaw: 0.95, label: 'Fuel Pump' });
+    }
+  }
+  buildFuelStation();
+
+  function updateFuel(dt, t) {
+    if (!busState.active) return;
+    const zone = FUEL_ZONES.find(fz => Math.hypot(busState.x - fz.x, busState.z - fz.z) < 7.2);
+    game.atFuelStation = !!zone;
+    if (zone && Math.abs(busState.speed) < 0.8 && busState.fuel < 99.4) {
+      const add = Math.min(99.4 - busState.fuel, 20 * dt);
+      const cost = add * FUEL_PRICE;
+      if (game.score >= cost && add > 0) {
+        busState.fuel += add;
+        game.score -= cost;
+        game.fuelSpent = (game.fuelSpent || 0) + cost;
+        if (ui) ui.status.textContent = 'Refuelling at ' + zone.name + ' · ₹' + cost.toFixed(1) + ' · ₹' + Math.round(game.score) + ' in hand';
+      } else if (add > 0.02 && t - (game.fuelFailAt || -9) > 3) {
+        game.fuelFailAt = t;
+        flashNotice('Not enough cash to refuel (₹2 / litre)', 'bad');
+      }
+    }
+  }
+
+  function callRescue() {
+    if (!busState.active || busState.fuel > 0.5) return;
+    const fee = Math.min(500, Math.max(0, game.score));
+    game.score = Math.max(0, game.score - 500);
+    busState.fuel = 42;
+    busState.speed = 0;
+    busState.steer = 0;
+    game.outOfFuelNotified = false;
+    flashNotice('Campus rescue dispatched · fuel topped up · ₹' + fee + ' fee', 'good');
+    if (ui) ui.status.textContent = 'Rescue complete — fuel topped up to 42 L (₹' + fee + ' fee)';
+  }
+
   const stopRingMeshes = [];
   const waitingStudents = [];
 
-  function buildBusStopShelters() {
+  // Shared low-poly student rig builder (waiting students at shelters + alighting passengers)
+  function createStudentRig(seedA, seedB) {
+    const si = seedA | 0, p = seedB | 0;
     const shirtColors = [0xd9534f, 0x337ab7, 0xf0ad4e, 0x5cb85c, 0x9b59b6, 0xe67e22];
+    const stu = new T.Group();
+    const pantsMat = new T.MeshStandardMaterial({
+      color: [0x263447, 0x3d3d3d, 0x4b3a2c, 0x2d3d34][(si + p) % 4], roughness: 0.92
+    });
+    const skinMat = new T.MeshStandardMaterial({
+      color: [0xc68b63, 0x9b6544, 0xe0b18d, 0x7e4f35][(si * 2 + p) % 4], roughness: 0.72
+    });
+    const hairMat = new T.MeshStandardMaterial({ color: 0x1b1612, roughness: 0.95 });
+    const shirtMat = new T.MeshStandardMaterial({
+      color: shirtColors[(si * 2 + p) % shirtColors.length], roughness: 0.78
+    });
+    const bagMat = new T.MeshStandardMaterial({
+      color: [0x1d2a3a, 0x63352f, 0x274b3a, 0x4b3e6b][(si + p) % 4], roughness: 0.8
+    });
+
+    const legL = new T.Group();
+    legL.position.set(-0.105, 0.74, 0);
+    const legLMesh = new T.Mesh(new T.BoxGeometry(0.14, 0.72, 0.16), pantsMat);
+    legLMesh.position.y = -0.36; legLMesh.castShadow = true;
+    legL.add(legLMesh);
+    const legR = new T.Group();
+    legR.position.set(0.105, 0.74, 0);
+    const legRMesh = new T.Mesh(new T.BoxGeometry(0.14, 0.72, 0.16), pantsMat);
+    legRMesh.position.y = -0.36; legRMesh.castShadow = true;
+    legR.add(legRMesh);
+
+    const torso = new T.Mesh(new T.BoxGeometry(0.40, 0.56, 0.25), shirtMat);
+    torso.position.y = 1.02; torso.castShadow = true;
+    const head = new T.Mesh(new T.SphereGeometry(0.135, 12, 10), skinMat);
+    head.position.y = 1.50; head.castShadow = true;
+    const hair = new T.Mesh(new T.SphereGeometry(0.145, 12, 8), hairMat);
+    hair.position.set(0, 1.55, -0.025); hair.scale.set(1.02, 0.62, 1.0);
+    const bag = new T.Mesh(new T.BoxGeometry(0.30, 0.36, 0.16), bagMat);
+    bag.position.set(0, 1.06, -0.19); bag.castShadow = true;
+
+    const armL = new T.Group();
+    armL.position.set(-0.255, 1.22, 0);
+    const armLMesh = new T.Mesh(new T.BoxGeometry(0.09, 0.50, 0.10), shirtMat);
+    armLMesh.position.y = -0.24;
+    armL.add(armLMesh);
+    const armR = new T.Group();
+    armR.position.set(0.255, 1.22, 0);
+    const armRMesh = new T.Mesh(new T.BoxGeometry(0.09, 0.50, 0.10), skinMat);
+    armRMesh.position.y = -0.24;
+    armR.add(armRMesh);
+
+    stu.add(legL, legR, torso, head, hair, bag, armL, armR);
+    return { stu, legL, legR, armL, armR };
+  }
+
+  function buildBusStopShelters() {
     for (let si = 0; si < BUS_STOPS.length; si++) {
       const st = BUS_STOPS[si];
       const ri = roadInfoAt(st.x, st.z);
@@ -570,6 +724,8 @@
       }
       const sy = Math.max(heightAt(sx, sz), st.y - 0.15);
       const shelterYaw = st.heading - Math.PI / 2;
+      st.shelterX = sx;
+      st.shelterZ = sz;
 
       const shelter = new T.Group();
       shelter.position.set(sx, sy, sz);
@@ -614,63 +770,18 @@
       solidObstacles.push({ kind: 'obb', cx: sx, cz: sz, hx: 2.65, hz: 1.15, yaw: shelterYaw });
 
       for (let p = 0; p < 2; p++) {
-        const stu = new T.Group();
+        const rig = createStudentRig(si, p);
+        const stu = rig.stu;
         const home = new T.Vector3(-0.95 + p * 1.9, 0.24, 0.30);
         stu.position.copy(home);
         const scale = 0.94 + ((si + p) % 3) * 0.035;
         stu.scale.setScalar(scale);
-
-        const pantsMat = new T.MeshStandardMaterial({
-          color: [0x263447, 0x3d3d3d, 0x4b3a2c, 0x2d3d34][(si + p) % 4], roughness: 0.92
-        });
-        const skinMat = new T.MeshStandardMaterial({
-          color: [0xc68b63, 0x9b6544, 0xe0b18d, 0x7e4f35][(si * 2 + p) % 4], roughness: 0.72
-        });
-        const hairMat = new T.MeshStandardMaterial({ color: 0x1b1612, roughness: 0.95 });
-        const shirtMat = new T.MeshStandardMaterial({
-          color: shirtColors[(si * 2 + p) % shirtColors.length], roughness: 0.78
-        });
-        const bagMat = new T.MeshStandardMaterial({
-          color: [0x1d2a3a, 0x63352f, 0x274b3a, 0x4b3e6b][(si + p) % 4], roughness: 0.8
-        });
-
-        const legL = new T.Group();
-        legL.position.set(-0.105, 0.74, 0);
-        const legLMesh = new T.Mesh(new T.BoxGeometry(0.14, 0.72, 0.16), pantsMat);
-        legLMesh.position.y = -0.36; legLMesh.castShadow = true;
-        legL.add(legLMesh);
-        const legR = new T.Group();
-        legR.position.set(0.105, 0.74, 0);
-        const legRMesh = new T.Mesh(new T.BoxGeometry(0.14, 0.72, 0.16), pantsMat);
-        legRMesh.position.y = -0.36; legRMesh.castShadow = true;
-        legR.add(legRMesh);
-
-        const torso = new T.Mesh(new T.BoxGeometry(0.40, 0.56, 0.25), shirtMat);
-        torso.position.y = 1.02; torso.castShadow = true;
-        const head = new T.Mesh(new T.SphereGeometry(0.135, 12, 10), skinMat);
-        head.position.y = 1.50; head.castShadow = true;
-        const hair = new T.Mesh(new T.SphereGeometry(0.145, 12, 8), hairMat);
-        hair.position.set(0, 1.55, -0.025); hair.scale.set(1.02, 0.62, 1.0);
-        const bag = new T.Mesh(new T.BoxGeometry(0.30, 0.36, 0.16), bagMat);
-        bag.position.set(0, 1.06, -0.19); bag.castShadow = true;
-
-        const armL = new T.Group();
-        armL.position.set(-0.255, 1.22, 0);
-        const armLMesh = new T.Mesh(new T.BoxGeometry(0.09, 0.50, 0.10), shirtMat);
-        armLMesh.position.y = -0.24;
-        armL.add(armLMesh);
-        const armR = new T.Group();
-        armR.position.set(0.255, 1.22, 0);
-        const armRMesh = new T.Mesh(new T.BoxGeometry(0.09, 0.50, 0.10), skinMat);
-        armRMesh.position.y = -0.24;
-        armR.add(armRMesh);
-
-        stu.add(legL, legR, torso, head, hair, bag, armL, armR);
         shelter.add(stu);
         waitingStudents.push({
-          mesh: stu, home, homeRot: Math.sin(si * 1.3 + p) * 0.45,
-          stopIndex: si, phase: si * 1.7 + p,
-          legL, legR, armL, armR,
+          mesh: stu, stopIndex: si, phase: si * 1.7 + p,
+          homeLocal: home.clone(), homeRot: Math.sin(si * 1.3 + p) * 0.45,
+          shelterYaw, shelterX: sx, shelterZ: sz,
+          legL: rig.legL, legR: rig.legR, armL: rig.armL, armR: rig.armR,
           state: 'waiting', walkT: 0, respawnAt: 0
         });
       }
@@ -685,6 +796,13 @@
       bayRing.position.set(st.x, st.y + 0.12, st.z);
       scene.add(bayRing);
       stopRingMeshes.push(bayRing);
+    }
+
+    // Re-parent waiting students into world space so they can walk to/from the bus in world coords
+    worldProps.updateMatrixWorld(true);
+    for (const s of waitingStudents) {
+      worldProps.attach(s.mesh);
+      s.home = s.mesh.position.clone();
     }
   }
   buildBusStopShelters();
@@ -1559,7 +1677,7 @@
     odo: 0, fuel: 100, temp: 72, score: 0,
     mode: 'free', gateOpen: 0, gateBlocked: true,
     health: 100, fines: 0, fineAmount: 0, lastFineAt: -999, lastHitFineAt: -999,
-    highBeam: false, hazards: false,
+    highBeam: false, hazards: false, doorOpen: 0,
     inParking: false, started: false,
     lastHornAt: 0, lastBlinkerAt: 0, blinker: 0
   };
@@ -1819,6 +1937,7 @@
   }
 
   function resetVehicle() {
+    if (busState.fuel <= 0.5 && busState.active) { callRescue(); return; }
     const sp = findNearestRoadPoint(busState.x, busState.z);
     busState.x = sp.x; busState.z = sp.z; busState.heading = sp.heading;
     busState.speed = 0; busState.steer = 0; busState.handbrake = false;
@@ -2054,7 +2173,8 @@
     checkpoints: [], cpIndex: 0, trialStart: 0, trialTime: 0, trialReady: false,
     trialDone: false, trialBest: 0, parkTarget: null, parkDone: false,
     parkProps: [], parkObstacles: [], targetRing: -1, nearSpeedCamera: false,
-    objectiveText: '', detailText: '', statusText: '', stopName: '', stopDist: 0
+    objectiveText: '', detailText: '', statusText: '', stopName: '', stopDist: 0,
+    dwellStopIndex: -1, dwellTime: 0, dwellAlighted: 0
   };
   try { game.trialBest = parseFloat(localStorage.getItem('iiser.drive.trialBest') || '0') || 0; } catch (_) {}
 
@@ -2129,6 +2249,8 @@
         '</div>' +
         '<div class="sh-bars">' +
           '<div><span>Fuel</span><strong id="sh-fuel">100%</strong></div>' +
+          '<div><span>Cash</span><strong id="sh-cash">&#8377;0</strong></div>' +
+          '<div><span>Students</span><strong id="sh-passengers">0</strong></div>' +
           '<div><span>Health</span><strong id="sh-health">100%</strong></div>' +
           '<div><span>Fines</span><strong id="sh-fines">&#8377;0</strong></div>' +
           '<div><span>Temp</span><strong id="sh-temp">72&deg;</strong></div>' +
@@ -2146,6 +2268,7 @@
           '<button class="btn" type="button" id="sh-lights">Lights</button>' +
           '<button class="btn" type="button" id="sh-hand">Brake</button>' +
           '<button class="btn" type="button" id="sh-reset">Reset</button>' +
+          '<button class="btn hidden" type="button" id="sh-rescue">Call rescue</button>' +
         '</div>' +
         '<div class="sh-selects">' +
           '<select class="sh-select" id="sh-fleet">' +
@@ -2206,6 +2329,8 @@
       indCam: hud.querySelector('#sh-ind-cam'),
       indGate: hud.querySelector('#sh-ind-gate'),
       fuel: hud.querySelector('#sh-fuel'),
+      cash: hud.querySelector('#sh-cash'),
+      passengers: hud.querySelector('#sh-passengers'),
       health: hud.querySelector('#sh-health'),
       fines: hud.querySelector('#sh-fines'),
       temp: hud.querySelector('#sh-temp'),
@@ -2223,6 +2348,7 @@
       lightsBtn: hud.querySelector('#sh-lights'),
       handBtn: hud.querySelector('#sh-hand'),
       resetBtn: hud.querySelector('#sh-reset'),
+      rescueBtn: hud.querySelector('#sh-rescue'),
       fleetSelect: hud.querySelector('#sh-fleet'),
       modeSelect: hud.querySelector('#sh-mode'),
       exitBtn: hud.querySelector('#sh-exit'),
@@ -2233,6 +2359,7 @@
     ui.hornBtn.addEventListener('click', () => honkHorn(true));
     ui.lightsBtn.addEventListener('click', toggleLights);
     ui.resetBtn.addEventListener('click', resetVehicle);
+    ui.rescueBtn.addEventListener('click', callRescue);
     ui.exitBtn.addEventListener('click', exitDriveMode);
     ui.mpBtn.addEventListener('click', openMpModal);
     ui.audioBtn.addEventListener('click', () => {
@@ -2336,16 +2463,23 @@
     game.score = busState.mode === 'route' ? game.score : 0;
 
     if (id === 'route') {
-      game.routeIdx = 0;
+      game.routeIdx = (game.pendingRouteIdx != null ? game.pendingRouteIdx : 0) % ROUTES.length;
+      game.pendingRouteIdx = null;
       game.stopPtr = 0;
       game.laps = 0;
       game.passengers = 0;
       game.score = 0;
+      game.dwellStopIndex = -1;
+      game.dwellTime = 0;
+      game.dwellAlighted = 0;
       game.objectiveText = ROUTES[0].name;
       game.detailText = 'Pick up students and complete all 8 stops on Route 101.';
       game.statusText = 'Route 101 · next stop loading…';
       switchVehicle('transit');
     } else if (id === 'trial') {
+      game.dwellStopIndex = -1;
+      game.dwellTime = 0;
+      game.dwellAlighted = 0;
       game.checkpoints = [0, 1, 2, 3, 4, 5, 6, 7];
       game.cpIndex = 0;
       game.trialReady = true;
@@ -2436,20 +2570,36 @@
       game.stopDist = d;
       ringPulse(stopIdx, t);
       game.objectiveText = rt.name;
-      game.statusText = 'Passengers ' + game.passengers + ' · Score ' + game.score;
-      if (d < 11 && Math.abs(busState.speed) < 1.5) {
-        game.stopPtr++;
-        game.passengers += 1 + Math.floor(Math.random() * 3);
-        game.score += 120;
-        playStopChime();
-        if (game.stopPtr >= rt.stops.length) {
-          game.stopPtr = 0;
-          game.laps++;
-          game.score += 500;
-          busState.fuel = Math.max(20, busState.fuel - 4);
+      game.statusText = 'Students ' + game.passengers + ' · Cash ₹' + Math.floor(game.score);
+      if (game.dwellStopIndex < 0 && d < 11 && Math.abs(busState.speed) < 0.8) {
+        game.dwellStopIndex = stopIdx;
+        game.dwellTime = 0;
+        game.dwellAlighted = spawnAlightingPassengers(1 + Math.floor(Math.random() * 2),
+          st.shelterX != null ? st.shelterX : st.x,
+          st.shelterZ != null ? st.shelterZ : st.z);
+        if (game.dwellAlighted > 0) {
+          flashNotice(game.dwellAlighted + ' passenger' + (game.dwellAlighted > 1 ? 's' : '') + ' getting off', 'good');
         }
-        if (ui) ui.status.textContent = 'Stop served: ' + st.name;
-        updateDestSign();
+      }
+      if (game.dwellStopIndex === stopIdx) {
+        game.dwellTime += dt;
+        const boarding = waitingStudents.filter(s => s.stopIndex === stopIdx && s.state === 'boarding').length;
+        game.statusText = 'Doors open · ' + boarding + ' boarding · ' + game.passengers + ' on board · ₹' + Math.floor(game.score);
+        if (game.dwellTime >= 3.25) {
+          game.stopPtr++;
+          if (game.stopPtr >= rt.stops.length) {
+            game.stopPtr = 0;
+            game.laps++;
+            game.score += 500;
+            busState.fuel = Math.max(20, busState.fuel - 4);
+            flashNotice('Loop complete · ₹500 bonus', 'good');
+          }
+          game.dwellStopIndex = -1;
+          game.dwellTime = 0;
+          game.dwellAlighted = 0;
+          playStopChime();
+          updateDestSign();
+        }
       }
     } else if (busState.mode === 'trial') {
       if (game.trialDone) {
@@ -2584,6 +2734,16 @@
         w.steerPivot.rotation.y += ((w.front ? busState.steer : 0) - w.steerPivot.rotation.y) * Math.min(1, dt * 10);
       }
     }
+    const doorTarget = busState.mode === 'route' && game.dwellStopIndex >= 0 ? 1 : 0;
+    busState.doorOpen += (doorTarget - busState.doorOpen) * Math.min(1, dt * 3.5);
+    if (busState.doorOpen < 0.015) busState.doorOpen = 0;
+    if (busState.doorOpen > 0.985) busState.doorOpen = 1;
+    if (rig.glbDoors && rig.glbDoors.length) {
+      for (const door of rig.glbDoors) {
+        const side = door.basePos.x >= 0 ? 1 : -1;
+        door.mesh.position.x = door.basePos.x + side * 0.28 * busState.doorOpen;
+      }
+    }
     if (rig.steeringWheel) {
       rig.steeringWheel.rotation.z += ((-busState.steer * 1.9) - rig.steeringWheel.rotation.z) * Math.min(1, dt * 10);
     }
@@ -2606,17 +2766,23 @@
     const def = VEHICLE_DEFS[busState.vehicle];
     const fwdIntent = held.up;
     const backIntent = held.down;
+    const serviceLock = busState.mode === 'route' && game.dwellStopIndex >= 0;
     let engine = 0;
     let braking = false;
 
     if (fwdIntent && !backIntent) {
       if (busState.speed < -0.25) braking = true;
-      else engine = busState.health > 0 ? def.accel : 0;
+      else engine = (busState.health > 0 && busState.fuel > 0) ? def.accel : 0;
     } else if (backIntent && !fwdIntent) {
       if (busState.speed > 0.25) braking = true;
-      else engine = -def.accel * 0.78;
+      else engine = (busState.health > 0 && busState.fuel > 0) ? -def.accel * 0.78 : 0;
     }
     if (held.hand) braking = true;
+    if (serviceLock) {
+      engine = 0;
+      braking = true;
+      busState.speed = 0;
+    }
 
     if (engine !== 0) busState.speed += engine * dt;
     if (braking) {
@@ -2636,6 +2802,7 @@
     busState.speed -= Math.sign(busState.speed) * Math.min(Math.abs(busState.speed), drag * dt);
     if (!fwdIntent && !backIntent && Math.abs(busState.speed) < 0.10) busState.speed = 0;
     busState.speed = clamp(busState.speed, -def.reverseMax, def.maxSpeed);
+    if (serviceLock) busState.speed = 0;
 
     const steerIn = (held.left ? 1 : 0) - (held.right ? 1 : 0);
     const speedNorm = clamp(Math.abs(busState.speed) / def.maxSpeed, 0, 1);
@@ -2676,7 +2843,11 @@
     syncRigPose(dt, false);
 
     busState.odo += Math.abs(busState.speed) * dt / 1000;
-    if (busState.fuel > 5) busState.fuel = Math.max(5, busState.fuel - Math.abs(busState.speed) * dt * 0.0022);
+    busState.fuel = Math.max(0, busState.fuel - Math.abs(busState.speed) * dt * 0.045);
+    if (busState.fuel <= 0 && !game.outOfFuelNotified) {
+      game.outOfFuelNotified = true;
+      flashNotice('OUT OF FUEL — press R or the RESCUE button (₹500)', 'bad');
+    }
     busState.temp = 72 + speedNorm * 18 + (fwdIntent ? 1.5 : 0);
 
     if (busState.speed < -0.2) busState.gear = 'R';
@@ -2856,6 +3027,9 @@
     ui.gear.classList.toggle('lit-amber', busState.gear === 'R');
     ui.rpm.style.width = clamp((busState.rpm - 700) / 1800, 0, 1) * 100 + '%';
     ui.fuel.textContent = Math.round(busState.fuel) + '%';
+    ui.cash.textContent = '₹' + Math.floor(game.score).toLocaleString('en-IN');
+    ui.passengers.textContent = String(game.passengers);
+    ui.rescueBtn.classList.toggle('hidden', !busState.active || busState.fuel > 0.5);
     ui.temp.textContent = Math.round(busState.temp) + '°';
     ui.odo.textContent = busState.odo.toFixed(1);
 
@@ -2875,7 +3049,11 @@
     ui.objective.textContent = game.objectiveText || 'Explore';
     ui.stopName.textContent = game.stopName || 'IISER Vithura Campus';
     ui.dist.textContent = game.stopDist > 0 ? Math.round(game.stopDist) + ' m' : '';
-    ui.status.textContent = game.statusText || 'Drive carefully — campus speed limit 30 km/h.';
+    ui.status.textContent = game.atFuelStation
+      ? (Math.abs(busState.speed) < 0.8
+        ? 'Fuel station · refuelling at ₹2/L · Cash ₹' + Math.floor(game.score)
+        : 'Fuel station · stop to refuel at ₹2/L')
+      : (game.statusText || 'Drive carefully — campus speed limit 30 km/h.');
     ui.objectiveDetail.textContent = game.detailText || '';
     ui.mpStatus.textContent = mp && mp.status ? mp.status : 'Solo session · 8-player rooms available';
     ui.mpRoomTag.textContent = mp && mp.enabled ? mp.room : 'SOLO';
@@ -2986,8 +3164,11 @@
       mp.status = 'Solo session · 8-player rooms available';
     } else {
       const n = mp.peers.size + 1;
+      const transportLabel = mp.wsOpen ? ' · WebSocket' :
+        (mp.transport === 'peer' ? ' · WebRTC peer-to-peer' :
+          (mp.transport === 'pending' ? ' · connecting' : ' · local co-op'));
       mp.status = 'Room ' + mp.room + ' · ' + n + ' driver' + (n === 1 ? '' : 's') +
-        (mp.wsOpen ? ' · WebSocket' : ' · local co-op');
+        transportLabel;
     }
     if (ui) {
       ui.mpStatus.textContent = mp.status;
@@ -3006,6 +3187,16 @@
     }
     if (mp.ws && mp.ws.readyState === 1) {
       try { mp.ws.send(JSON.stringify(packet)); } catch (_) {}
+    }
+    if (star.peer) {
+      // Star relay: host sends to all guests; guests send upstream to the host (host re-broadcasts)
+      if (star.role === 'guest') {
+        if (star.hostConn && star.hostConn.open) { try { star.hostConn.send(packet); } catch (_) {} }
+      } else if (star.role === 'host') {
+        for (const [, gconn] of star.guests) {
+          if (gconn.open) { try { gconn.send(packet); } catch (_) {} }
+        }
+      }
     }
   }
 
@@ -3082,11 +3273,16 @@
       }
     } else if (msg.type === 'roster') {
       const list = Array.isArray(msg.players) ? msg.players : [];
+      const activeIds = new Set(list.map(p => p && p.id).filter(id => id && id !== localPlayer.id && id !== mp.serverId));
+      for (const id of Array.from(mp.peers.keys())) if (!activeIds.has(id)) removePeer(id);
       for (const p of list) ensurePeer(p);
       updateMpBoard();
       mpStatusUpdate();
     } else if (msg.type === 'welcome') {
       mp.serverId = msg.id || '';
+      // The server replaces our client-side id on the wire; adopt it so the roster's
+      // self entry matches localPlayer.id and nobody spawns a phantom of their own bus
+      if (msg.id) localPlayer.id = msg.id;
       mp.status = 'Room ' + (msg.room || mp.room) + ' · connected · max ' + (msg.maxPlayers || 8);
       if (ui) ui.mpStatus.textContent = mp.status;
       updateMpBoard();
@@ -3103,6 +3299,7 @@
   }
 
   function teardownMp() {
+    teardownStar();
     if (mp.channel) { try { mp.channel.close(); } catch (_) {} }
     mp.channel = null;
     if (mp.ws) { try { mp.ws.close(); } catch (_) {} }
@@ -3122,25 +3319,241 @@
     updateMpBoard();
   }
 
+  // ---------- Peer-to-peer (WebRTC) star relay: works on static hosts like Vercel — no server required ----------
+  // First driver to open the room "hosts" it (claims a well-known peer id); everyone else connects to
+  // the host, which relays packets to the rest of the room. Up to 8 drivers per room.
+  const star = { peer: null, role: null, hostConn: null, guests: new Map(), settled: false };
+
+  function loadPeerJs(cb) {
+    if (window.Peer) { cb(true); return; }
+    // Vendored first (self-contained on any static host incl. Vercel), CDNs as fallback
+    const urls = [
+      'vendor/peerjs.min.js',
+      'https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js',
+      'https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js'
+    ];
+    let i = 0;
+    const tryNext = () => {
+      if (window.Peer) { cb(true); return; }
+      if (i >= urls.length) { cb(false); return; }
+      const s = document.createElement('script');
+      s.src = urls[i++];
+      s.onload = () => cb(true);
+      s.onerror = tryNext;
+      document.head.appendChild(s);
+    };
+    tryNext();
+  }
+
+  function starRosterPlayers() {
+    const players = [{
+      id: localPlayer.id, name: localPlayer.name, fleet: busState.fleetKey, vehicle: busState.vehicle,
+      colorIdx: localPlayer.colorIdx, mode: busState.mode, score: game.score,
+      x: busState.x, y: getSurfaceHeight(busState.x, busState.z), z: busState.z, heading: busState.heading
+    }];
+    for (const g of star.guests.values()) players.push(g);
+    return players;
+  }
+
+  function starBroadcastRoster() {
+    const msg = { type: 'roster', room: mp.room, players: starRosterPlayers() };
+    for (const [, conn] of star.guests) { if (conn && conn.open) { try { conn.send(msg); } catch (_) {} } }
+    handleMpPacket(msg);
+  }
+
+  function starUpdateGuest(pid, msg) {
+    const prev = star.guests.get(pid) || {
+      id: pid, name: 'Driver', fleet: 'transit', colorIdx: 0,
+      mode: 'free', score: 0, x: 197.5, y: 105, z: 534.0, heading: 0.48
+    };
+    if (msg.id) prev.id = msg.id;
+    if (msg.name) prev.name = String(msg.name).slice(0, 18);
+    if (msg.fleet) prev.fleet = msg.fleet;
+    if (typeof msg.colorIdx === 'number') prev.colorIdx = msg.colorIdx;
+    if (msg.mode) prev.mode = String(msg.mode);
+    if (msg.score != null) prev.score = +msg.score || 0;
+    if (msg.x != null) {
+      prev.x = +msg.x || 0; prev.y = +msg.y || 0; prev.z = +msg.z || 0;
+      prev.heading = +msg.heading || 0;
+    }
+    star.guests.set(pid, prev);
+  }
+
+  function starGuestHello() {
+    return {
+      type: 'hello', id: localPlayer.id, name: localPlayer.name, fleet: busState.fleetKey, vehicle: busState.vehicle,
+      colorIdx: localPlayer.colorIdx, mode: busState.mode,
+      x: busState.x, y: getSurfaceHeight(busState.x, busState.z), z: busState.z, heading: busState.heading
+    };
+  }
+
+  function attachPeer(room) {
+    if (!mp.enabled || star.peer) return;
+    star.settled = false;
+    const hostId = 'iiser-drive-' + room;
+
+    const claimHost = () => {
+      let peer;
+      try { peer = new window.Peer(hostId, { debug: 0 }); } catch (_) { return starGuestConnect(); }
+      star.peer = peer;
+      star.role = 'host';
+      peer.on('open', () => {
+        if (!mp.enabled) { try { peer.destroy(); } catch (_) {} star.peer = null; return; }
+        star.settled = true;
+        mp.transport = 'peer';
+        mp.status = 'Room ' + mp.room + ' · peer-to-peer host (' + 1 + ' driver)';
+        mpStatusUpdate();
+        starBroadcastRoster();
+      });
+      peer.on('connection', (conn) => {
+        if (!mp.enabled) { try { conn.close(); } catch (_) {} return; }
+        if (star.guests.size >= 7) { // host + 7 guests = 8 drivers
+          try { conn.send({ type: 'roomFull', maxPlayers: 8 }); } catch (_) {}
+          try { conn.close(); } catch (_) {}
+          return;
+        }
+        conn.on('data', (msg) => {
+          if (!msg || typeof msg !== 'object') return;
+          if (msg.type === 'hello' || msg.type === 'state') {
+            starUpdateGuest(conn.peer, msg);
+            // Keep the host's own vehicle, live map, and roster in sync too.
+            if (msg.type === 'state') handleMpPacket(msg);
+            for (const [pid, gconn] of star.guests) {
+              if (pid !== conn.peer && gconn.open) { try { gconn.send(msg); } catch (_) {} }
+            }
+            if (msg.type === 'hello') starBroadcastRoster();
+          } else if (msg.type === 'horn' || msg.type === 'modeStart') {
+            for (const [pid, gconn] of star.guests) {
+              if (pid !== conn.peer && gconn.open) { try { gconn.send(msg); } catch (_) {} }
+            }
+            handleMpPacket(msg);
+          }
+        });
+        conn.on('close', () => {
+          star.guests.delete(conn.peer);
+          if (mp.enabled) starBroadcastRoster();
+        });
+        conn.on('error', () => {
+          star.guests.delete(conn.peer);
+          if (mp.enabled) starBroadcastRoster();
+        });
+        conn.on('open', () => { star.guests.set(conn.peer, { id: conn.peer, name: 'Driver', fleet: 'transit', colorIdx: 0, mode: 'free', score: 0, x: 197.5, y: 105, z: 534.0, heading: 0.48 }); });
+      });
+      peer.on('error', (err) => {
+        const type = err && err.type;
+        if (type === 'unavailable-id' && star.peer === peer) {
+          try { peer.destroy(); } catch (_) {}
+          star.peer = null;
+          starGuestConnect();
+        } else if (!star.settled && star.peer === peer) {
+          starFallbackLocal();
+        }
+      });
+    };
+
+    const starGuestConnect = () => {
+      let peer;
+      try { peer = new window.Peer(undefined, { debug: 0 }); } catch (_) { return starFallbackLocal(); }
+      star.peer = peer;
+      star.role = 'guest';
+      peer.on('open', () => {
+        if (!mp.enabled) { try { peer.destroy(); } catch (_) {} star.peer = null; return; }
+        let conn;
+        try { conn = peer.connect(hostId, { reliable: true, serialization: 'json' }); } catch (_) { return starFallbackLocal(); }
+        star.hostConn = conn;
+        mp.transport = 'peer';
+        mp.status = 'Room ' + mp.room + ' · peer-to-peer, joining host…';
+        mpStatusUpdate();
+        conn.on('open', () => {
+          star.settled = true;
+          mp.transport = 'peer';
+          mp.status = 'Room ' + mp.room + ' · peer-to-peer (live)';
+          mpStatusUpdate();
+          try { conn.send(starGuestHello()); } catch (_) {}
+        });
+        conn.on('data', (msg) => { try { handleMpPacket(msg); } catch (_) {} });
+        conn.on('close', () => {
+          if (mp.enabled) {
+            mp.status = 'Room ' + mp.room + ' · host left — room closed';
+            mpStatusUpdate();
+            for (const id of Array.from(mp.peers.keys())) removePeer(id);
+          }
+        });
+        conn.on('error', () => {
+          if (mp.enabled) {
+            mp.status = 'Room ' + mp.room + ' · peer connection lost — local co-op only';
+            mpStatusUpdate();
+          }
+        });
+      });
+      peer.on('error', (err) => {
+        const type = err && err.type;
+        if (type === 'peer-unavailable' && star.peer === peer) {
+          // Nobody is hosting yet — become the host
+          try { peer.destroy(); } catch (_) {}
+          star.peer = null;
+          star.role = null;
+          claimHost();
+        } else if (!star.settled && star.peer === peer) {
+          starFallbackLocal();
+        }
+      });
+    };
+
+    const starFallbackLocal = () => {
+      star.settled = true;
+      mp.transport = 'bc';
+      mp.status = 'Room ' + mp.room + ' · local co-op only (peer-to-peer unreachable — check your internet)';
+      mpStatusUpdate();
+    };
+
+    // Guest role: try connecting to the host id; on peer-unavailable we host instead.
+    // Host role: claim the well-known id; on unavailable-id we guest-connect instead.
+    loadPeerJs((ok) => { if (!ok) return starFallbackLocal(); if (!star.peer) claimHost(); });
+  }
+
+  function teardownStar() {
+    try { for (const [, conn] of star.guests) { try { conn.close(); } catch (_) {} } } catch (_) {}
+    if (star.hostConn) { try { star.hostConn.close(); } catch (_) {} }
+    if (star.peer) { try { star.peer.destroy(); } catch (_) {} }
+    star.peer = null; star.role = null; star.hostConn = null; star.guests.clear(); star.settled = false;
+  }
+
   function connectRoomSocket(room) {
+    // Static deployments (including Vercel) use PeerJS/WebRTC directly. The
+    // bundled Node server exposes /ws on localhost, or a custom endpoint can be
+    // supplied as window.IISER_MULTIPLAYER_WS for a separately hosted server.
+    const configuredUrl = window.IISER_MULTIPLAYER_WS || '';
+    const isLocalServer = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname) || location.port === '8765';
+    if (!configuredUrl && !isLocalServer) {
+      attachPeer(room);
+      return;
+    }
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const host = location.hostname || 'localhost';
-    const sameOrigin = proto + '//' + location.host + '/ws';
-    const legacy = proto + '//' + host + ':8765/ws';
-    const fallback = sameOrigin === legacy ? null : legacy;
-    let triedFallback = false;
+    const socketUrl = configuredUrl || (proto + '//' + location.host + '/ws');
     let settled = false;
+    let peerStarted = false;
+    const startPeer = () => {
+      if (peerStarted || !mp.enabled) return;
+      peerStarted = true;
+      attachPeer(room);
+    };
+    const tryPeer = () => {
+      if (settled || !mp.enabled) return;
+      clearTimeout(failsafe);
+      settled = true;
+      startPeer();
+    };
     const failsafe = setTimeout(() => {
       if (settled || !mp.enabled) return;
-      mp.transport = 'bc';
-      mp.status = 'Room ' + mp.room + ' · local co-op (run multiplayer-server.js for internet play)';
-      if (ui) ui.mpStatus.textContent = mp.status;
-    }, 2600);
+      tryPeer();
+    }, 1200);
 
     function attach(socket) {
       mp.ws = socket;
       socket.onopen = () => {
         if (mp.ws !== socket) return;
+        if (peerStarted) { try { socket.close(); } catch (_) {} return; }
         settled = true;
         clearTimeout(failsafe);
         mp.wsOpen = true;
@@ -3161,27 +3574,22 @@
         if (mp.ws !== socket) return;
         clearTimeout(failsafe);
         mp.wsOpen = false;
+        if (!settled) { tryPeer(); return; }
+        if (peerStarted) return;
         if (mp.enabled) {
-          mp.status = 'Room ' + mp.room + ' · local co-op (server offline)';
+          mp.status = 'Room ' + mp.room + ' · server connection dropped — reconnecting peer-to-peer';
           if (ui) ui.mpStatus.textContent = mp.status;
+          startPeer();
         }
       };
       socket.onerror = () => {
-        if (mp.ws === socket && !settled && fallback && !triedFallback) {
-          triedFallback = true;
-          try { attach(new WebSocket(fallback)); } catch (_) {}
-        }
+        if (mp.ws === socket && !settled) tryPeer();
       };
     }
     try {
-      attach(new WebSocket(sameOrigin));
+      attach(new WebSocket(socketUrl));
     } catch (_) {
-      if (fallback) {
-        try { attach(new WebSocket(fallback)); return; } catch (_e) {}
-      }
-      mp.status = 'Local co-op only · WebSocket unavailable';
-      if (ui) ui.mpStatus.textContent = mp.status;
-      return;
+      tryPeer();
     }
   }
 
@@ -3279,7 +3687,7 @@
           '<button class="close" type="button" id="mp-close">&times;</button>' +
           '<div class="kicker">8-player campus cruise</div>' +
           '<h2>Multiplayer</h2>' +
-          '<p>Friends join through the <strong>same link you opened</strong>. Run <code>node multiplayer-server.js</code> to serve the game + WebSocket rooms on one port; for internet play share a tunnel (e.g. <code>cloudflared tunnel --url http://localhost:8765</code>) or forward port 8765 — same-browser tabs sync locally without it.</p>' +
+          '<p><strong>Vercel and static hosting:</strong> drivers connect through PeerJS signaling, then share live vehicle positions directly over WebRTC. Share the room code to join the same 8-driver session. For a self-hosted room server, run <code>node multiplayer-server.js</code>; it provides the <code>/ws</code> endpoint. If peer networking is blocked, use the self-hosted server.</p>' +
           '<div class="mp-modal-grid">' +
             '<div class="mp-field"><label for="mp-name">Callsign</label>' +
               '<input id="mp-name" class="mp-input" maxlength="18" autocomplete="off"></div>' +
@@ -3305,7 +3713,7 @@
               '</select></div>' +
           '</div>' +
           '<div class="mp-field"><label>Bus colour</label><div class="mp-swatches" id="mp-colors"></div></div>' +
-          '<div class="mp-status-box" id="mp-modal-status">Rooms hold up to 8 drivers. No traffic lights, just campus traffic rules.</div>' +
+          '<div class="mp-status-box" id="mp-modal-status">Up to 8 drivers · peer-to-peer on static hosts · your vehicle is ready for this session.</div>' +
           '<div class="mp-btn-row">' +
             '<button class="btn primary" type="button" id="mp-connect">Connect</button>' +
             '<button class="btn" type="button" id="mp-disconnect">Leave room</button>' +
@@ -3397,11 +3805,118 @@
   }
 
   // ---------- Frame loop hooks ----------
+  // Waiting students walk to the bus door and climb aboard when the bus dwells at a stop;
+  // passengers alight onto the shelter side. Fares ₹20 per boarding student.
+  const alightingStudents = [];
+
+  function spawnAlightingPassengers(count, shelX, shelZ) {
+    const n = Math.min(game.passengers, count);
+    if (n <= 0) return 0;
+    const h = busState.heading;
+    const leftX = Math.cos(h), leftZ = -Math.sin(h);
+    for (let i = 0; i < n; i++) {
+      const rig = createStudentRig(i + 1, (game.passengers + i) % 4);
+      const stu = rig.stu;
+      const doorX = busState.x + leftX * 1.35, doorZ = busState.z + leftZ * 1.35;
+      const gy = getSurfaceHeight(doorX, doorZ);
+      stu.position.set(doorX, gy + 0.02, doorZ);
+      const dx = shelX - doorX, dz = shelZ - doorZ;
+      const len = Math.hypot(dx, dz) || 1;
+      const dist = 2.0 + Math.random() * 1.6;
+      alightingStudents.push({
+        mesh: stu, legL: rig.legL, legR: rig.legR, armL: rig.armL, armR: rig.armR,
+        fromX: doorX, fromZ: doorZ, toX: doorX + (dx / len) * dist, toZ: doorZ + (dz / len) * dist,
+        walkT: 0, phase: Math.random() * 6.28
+      });
+      worldProps.add(stu);
+    }
+    game.passengers -= n;
+    return n;
+  }
+
   function updateWaitingStudents(dt, t) {
     for (let i = 0; i < waitingStudents.length; i++) {
       const s = waitingStudents[i];
-      s.mesh.position.y = 0.24 + Math.abs(Math.sin(t * 1.7 + s.phase)) * 0.018;
-      s.mesh.rotation.y = Math.sin(t * 0.55 + s.phase) * 0.22;
+      const m = s.mesh;
+      if (s.state === 'waiting') {
+        m.position.y = s.home.y + Math.abs(Math.sin(t * 1.7 + s.phase)) * 0.018;
+        m.rotation.y = s.homeRot + Math.sin(t * 0.55 + s.phase) * 0.22;
+        const st = BUS_STOPS[s.stopIndex];
+        if (busState.active && busState.mode === 'route' && game.dwellStopIndex === s.stopIndex && Math.abs(busState.speed) < 0.8) {
+          const d = Math.hypot(busState.x - st.x, busState.z - st.z);
+          if (d < 11) {
+            const shx = s.shelterX != null ? s.shelterX : st.x;
+            const shz = s.shelterZ != null ? s.shelterZ : st.z;
+            let dx = shx - busState.x, dz = shz - busState.z;
+            const len = Math.hypot(dx, dz) || 1;
+            s.doorX = busState.x + (dx / len) * 1.55;
+            s.doorZ = busState.z + (dz / len) * 1.55;
+            s.fromX = m.position.x;
+            s.fromZ = m.position.z;
+            s.fromY = m.position.y;
+            s.doorY = getSurfaceHeight(s.doorX, s.doorZ) + 0.02;
+            s.state = 'boarding';
+            s.walkT = 0;
+          }
+        }
+        continue;
+      } else if (s.state === 'boarding') {
+        s.walkT += dt / 1.45;
+        const k = Math.min(1, s.walkT);
+        const e = k * k * (3 - 2 * k);
+        m.position.x = s.fromX + (s.doorX - s.fromX) * e;
+        m.position.z = s.fromZ + (s.doorZ - s.fromZ) * e;
+        m.position.y = (s.fromY + (s.doorY - s.fromY) * e) + Math.sin(k * Math.PI) * 0.1;
+        m.rotation.y = Math.atan2(s.doorX - s.fromX, s.doorZ - s.fromZ);
+        const swing = Math.sin(s.walkT * 15) * 0.62;
+        s.legL.rotation.x = swing;
+        s.legR.rotation.x = -swing;
+        s.armL.rotation.x = -swing * 0.75;
+        s.armR.rotation.x = swing * 0.75;
+        if (k >= 1) {
+          m.visible = false;
+          s.state = 'gone';
+          s.respawnAt = t + 20 + ((i * 7 + 3) % 13);
+          game.passengers += 1;
+          game.score += 20; // ₹20 fare per passenger
+          flashNotice('+₹20 · passenger boarded', 'good');
+          if (audioCtx) { try { playStopChime(); } catch (_) {} }
+        }
+        continue;
+      } else if (s.state === 'gone') {
+        if (t >= s.respawnAt) {
+          m.position.copy(s.home);
+          m.rotation.y = s.homeRot;
+          m.scale.setScalar(0.94 + ((s.stopIndex + i) % 3) * 0.035);
+          m.visible = true;
+          s.state = 'waiting';
+        }
+        continue;
+      }
+    }
+    // Alighting passengers stroll toward the shelter and fade out
+    for (let i = alightingStudents.length - 1; i >= 0; i--) {
+      const a = alightingStudents[i];
+      a.walkT += dt / 1.6;
+      const k = Math.min(1, a.walkT);
+      const e = k * k * (3 - 2 * k);
+      a.mesh.position.x = a.fromX + (a.toX - a.fromX) * e;
+      a.mesh.position.z = a.fromZ + (a.toZ - a.fromZ) * e;
+      a.mesh.position.y = getSurfaceHeight(a.mesh.position.x, a.mesh.position.z) + 0.02 + Math.sin(k * Math.PI * 4) * 0.03;
+      a.mesh.rotation.y = Math.atan2(a.toX - a.fromX, a.toZ - a.fromZ);
+      const swing = Math.sin(a.walkT * 15) * 0.6;
+      a.legL.rotation.x = swing;
+      a.legR.rotation.x = -swing;
+      a.armL.rotation.x = -swing * 0.7;
+      a.armR.rotation.x = swing * 0.7;
+      if (k > 0.72) {
+        const fade = 1 - (k - 0.72) / 0.28;
+        a.mesh.scale.setScalar(Math.max(0.01, fade) * 0.97);
+      }
+      if (k >= 1) {
+        worldProps.remove(a.mesh);
+        alightingStudents.splice(i, 1);
+      }
     }
   }
 
@@ -3411,6 +3926,7 @@
     updateWaitingStudents(dt, t);
     if (busState.active) {
       updatePlayer(dt, t);
+      updateFuel(dt, t);
       checkSpeedCameras(t);
       updateDriveCamera(dt, t);
       updateObjective(dt, t);
@@ -3424,12 +3940,64 @@
 
   if (W.onMinimapDraw) {
     W.onMinimapDraw((ctx, mx, my) => {
+      // Highlight the active shuttle route + next stop on the 2D minimap
+      const info = getRoutesInfo();
+      const active = info.routes[info.activeIdx];
+      if (active && (busState.mode === 'route' || busState.mode === 'trial')) {
+        ctx.save();
+        ctx.strokeStyle = active.color;
+        ctx.globalAlpha = 0.82;
+        ctx.lineWidth = 2.6;
+        ctx.lineJoin = 'round';
+        ctx.beginPath();
+        active.stops.forEach((st, i) => {
+          if (i === 0) ctx.moveTo(mx(st.x), my(st.z));
+          else ctx.lineTo(mx(st.x), my(st.z));
+        });
+        ctx.closePath();
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+        for (const st of active.stops) {
+          ctx.fillStyle = active.color;
+          ctx.beginPath();
+          ctx.arc(mx(st.x), my(st.z), 2.6, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        // Next stop pulse + bearing line
+        const next = BUS_STOPS[active.stops[game.stopPtr % active.stops.length].index];
+        if (next) {
+          const nx = mx(next.x), ny = my(next.z);
+          ctx.setLineDash([4, 4]);
+          ctx.strokeStyle = 'rgba(255,255,255,0.65)';
+          ctx.lineWidth = 1.1;
+          ctx.beginPath();
+          ctx.moveTo(mx(busState.x), my(busState.z));
+          ctx.lineTo(nx, ny);
+          ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.strokeStyle = active.color;
+          ctx.lineWidth = 1.6;
+          ctx.beginPath();
+          ctx.arc(nx, ny, 5.2, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+        ctx.restore();
+      }
       for (let i = 0; i < aiCars.length; i++) {
         const c = aiCars[i];
         ctx.fillStyle = 'rgba(240,230,200,0.72)';
         ctx.beginPath();
         ctx.arc(mx(c.x), my(c.z), 1.7, 0, Math.PI * 2);
         ctx.fill();
+      }
+      for (const station of FUEL_ZONES) {
+        ctx.fillStyle = '#45d8e8';
+        ctx.strokeStyle = '#072127';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.arc(mx(station.x), my(station.z), 3.4, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
       }
       if (mp.enabled) {
         for (const p of mp.peers.values()) {
@@ -3442,17 +4010,53 @@
       if (busState.initialized) {
         ctx.save();
         ctx.translate(mx(busState.x), my(busState.z));
+        // The triangle points down for +Z; positive game yaw turns toward +X.
         ctx.rotate(-busState.heading);
         ctx.fillStyle = '#ffd166';
         ctx.beginPath();
-        ctx.moveTo(0, -5.5);
-        ctx.lineTo(3.4, 4.2);
-        ctx.lineTo(-3.4, 4.2);
+        ctx.moveTo(0, 5.5);
+        ctx.lineTo(3.4, -4.2);
+        ctx.lineTo(-3.4, -4.2);
         ctx.closePath();
         ctx.fill();
         ctx.restore();
       }
     });
+  }
+
+  function getRoutesInfo() {
+    return {
+      activeIdx: ((game.routeIdx % ROUTES.length) + ROUTES.length) % ROUTES.length,
+      colors: ROUTE_COLORS.slice(),
+      routes: ROUTES.map((r, i) => ({
+        index: i,
+        id: r.id,
+        name: r.name,
+        color: ROUTE_COLORS[i % ROUTE_COLORS.length],
+        stops: r.stops.map(si => ({
+          index: si, id: BUS_STOPS[si].id, name: BUS_STOPS[si].name,
+          x: BUS_STOPS[si].x, z: BUS_STOPS[si].z
+        }))
+      }))
+    };
+  }
+
+  function selectRoute(idx) {
+    if (typeof idx !== 'number' || !isFinite(idx)) return;
+    idx = ((idx % ROUTES.length) + ROUTES.length) % ROUTES.length;
+    if (busState.mode === 'route') {
+      if (game.routeIdx === idx) return;
+      game.routeIdx = idx;
+      game.stopPtr = 0;
+      game.laps = 0;
+      game.objectiveText = ROUTES[idx].name;
+      game.statusText = 'Switched to ' + ROUTES[idx].name;
+      flashNotice('Switched to ' + ROUTES[idx].name);
+      updateDestSign();
+    } else {
+      game.pendingRouteIdx = idx;
+      flashNotice(ROUTES[idx].name + ' armed — press Drive this route');
+    }
   }
 
   // ---------- Public SDK used by app.js ----------
@@ -3464,11 +4068,21 @@
     setCamMode: setCamMode,
     cycleCamMode: cycleCamMode,
     openMultiplayer: openMpModal,
+    getRoutesInfo: getRoutesInfo,
+    selectRoute: selectRoute,
     isActive: function () { return busState.active; },
     getState: function () { return busState; },
     getFocusPosition: function () { return activeRig.root.position; },
     getTraffic: function () {
       return aiCars.map(c => ({ x: c.x, z: c.z, heading: c.heading, speed: c.speed, road: c.road.ri }));
+    },
+    getFuelStations: function () {
+      return FUEL_ZONES.map(station => ({ x: station.x, z: station.z, name: station.name }));
+    },
+    getPeers: function () {
+      return Array.from(mp.peers.values()).map(p => ({
+        x: p.x, z: p.z, heading: p.heading, colorIdx: p.colorIdx, name: p.name, fleet: p.fleet
+      }));
     },
     rebuildObstacleGrid: function () {
       staticGrid.clear();

@@ -97,6 +97,7 @@
     <div class="group">
       <div class="kicker">Views</div>
       <div class="view-grid">
+        <button class="btn wide" id="open-navmap" type="button">2D Navigation map</button>
         <button class="btn" data-view="overview">Overview</button>
         <button class="btn" data-view="academics">Academics</button>
         <button class="btn" data-view="stadium">Stadium &amp; Lake</button>
@@ -156,6 +157,35 @@
     <button class="btn" id="info-dismiss">Dismiss</button>
   </div>
 </aside>
+
+<div id="navmap" class="hidden" role="dialog" aria-label="2D navigation map">
+  <canvas id="navmap-canvas" aria-label="Campus navigation map"></canvas>
+  <div class="navmap-top">
+    <div class="navmap-title"><span class="mark"></span> CAMPUS NAVIGATION</div>
+    <div class="navmap-chips" id="navmap-chips" role="tablist" aria-label="Routes">
+      <button class="nav-chip on" data-route="all" type="button">All routes</button>
+      <button class="nav-chip" id="nav-center-player" type="button" title="Center the map on your vehicle">Center on me</button>
+      <button class="nav-chip nav-chip-toggle on" id="nav-traffic" type="button" title="Toggle live traffic layer">Traffic</button>
+      <button class="nav-chip nav-chip-toggle on" id="nav-names" type="button" title="Toggle driver name labels">Names</button>
+    </div>
+    <button id="navmap-close" class="navmap-close" aria-label="Close map" type="button">×</button>
+  </div>
+  <aside class="navmap-panel" id="navmap-panel">
+    <div class="navmap-route-name" id="navmap-route-name">All shuttle routes</div>
+    <div class="navmap-route-count" id="navmap-route-count">4 routes · 16 stops</div>
+    <ol class="navmap-stops" id="navmap-stops"></ol>
+    <button class="btn primary wide" id="navmap-drive" type="button">Drive this route</button>
+    <div class="navmap-legend">
+      <span><i class="lg lg-road"></i>Campus road</span>
+      <span><i class="lg lg-hwy"></i>SH-45 Highway</span>
+      <span><i class="lg lg-water"></i>Waterbody</span>
+      <span><i class="lg lg-gate"></i>Main Gate</span>
+      <span><i class="lg lg-bus"></i>You (live)</span>
+      <span><i class="lg lg-fuel"></i>Fuel station</span>
+    </div>
+  </aside>
+  <div class="navmap-hint">Drag to pan · scroll to zoom · click a stop to locate · <kbd>N</kbd> or <kbd>Esc</kbd> to close</div>
+</div>
 
 <div id="bottom-left">
   <div class="readout panel" id="readout">

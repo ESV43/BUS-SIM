@@ -371,9 +371,11 @@
   };
 
   const host = document.getElementById('scene-host');
+  const initialDpr = Math.min(window.devicePixelRatio || 1, 2);
   let renderer;
   try {
-    renderer = new T.WebGLRenderer({ antialias: true, powerPreference: 'high-performance', alpha: false, stencil: false });
+    // MSAA only pays off at low pixel ratios — skip it on hi-DPI / retina screens (huge fill savings)
+    renderer = new T.WebGLRenderer({ antialias: initialDpr <= 1.5, powerPreference: 'high-performance', alpha: false, stencil: false });
   } catch (e) {
     fail('WebGL is required to view this 3D campus. Please try a current version of Chrome, Edge, Firefox or Safari.');
     return;
@@ -391,25 +393,41 @@
   const QUALITY_KEY = 'iiser.quality';
   let qualityMode = 'auto';
   try { qualityMode = localStorage.getItem(QUALITY_KEY) || 'auto'; } catch (_) {}
-  const perf = { scale: 1, ema: 1 / 60, lastAdjust: 0 };
+  if (!/^(auto|low|medium|high)$/.test(qualityMode)) qualityMode = 'auto';
+  const perf = { scale: 0.72, ema: 1 / 60, lastAdjust: 0 };
+  function shadowResolutionFor(mode) {
+    if (mode === 'high') return 1536;
+    if (mode === 'medium' && !isSoftwareGL && !state.reduced && window.innerWidth >= 900) return 1024;
+    return 512;
+  }
   function basePixelRatio() {
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    if (qualityMode === 'low') return 1;
+    if (qualityMode === 'low') return 0.82;
     if (qualityMode === 'medium') return Math.min(dpr, 1.5);
     if (qualityMode === 'high') return dpr;
-    return Math.min(dpr, 1.5); // auto starts here, adapts down under load
+    return Math.min(dpr, 1.25);
   }
   function effectivePixelRatio() {
     const base = isSoftwareGL ? 1 : basePixelRatio();
-    return Math.max(1, base * (qualityMode === 'auto' ? perf.scale : 1));
+    return Math.max(0.62, base * (qualityMode === 'auto' ? perf.scale : 1));
   }
   function setQuality(mode) {
     if (!/^(auto|low|medium|high)$/.test(mode)) mode = 'auto';
     qualityMode = mode;
     try { localStorage.setItem(QUALITY_KEY, mode); } catch (_) {}
-    perf.scale = 1;
+    perf.scale = mode === 'auto' ? 0.72 : 1;
     renderer.setPixelRatio(effectivePixelRatio());
-    if (unrealFXRef) unrealFXRef.setPostEnabled(mode !== 'low');
+    if (unrealFXRef) unrealFXRef.resize();
+    renderer.shadowMap.enabled = mode !== 'low';
+    const shadowResolution = shadowResolutionFor(mode);
+    if (sunLight.shadow.mapSize.width !== shadowResolution) {
+      sunLight.shadow.mapSize.set(shadowResolution, shadowResolution);
+      if (sunLight.shadow.map) { sunLight.shadow.map.dispose(); sunLight.shadow.map = null; }
+    }
+    renderer.shadowMap.needsUpdate = true;
+    // The bloom/depth composite costs several full-screen passes. Keep Auto and
+    // Medium responsive; reserve it for users who explicitly choose High.
+    if (unrealFXRef) unrealFXRef.setPostEnabled(mode === 'high');
     window.dispatchEvent(new CustomEvent('iiser:quality', { detail: mode }));
   }
   renderer.setPixelRatio(effectivePixelRatio());
@@ -418,8 +436,8 @@
   renderer.outputEncoding = T.sRGBEncoding;
   renderer.toneMapping = T.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.02;
-  renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = T.PCFSoftShadowMap;
+  renderer.shadowMap.enabled = qualityMode !== 'low';
+  renderer.shadowMap.type = T.PCFShadowMap; // cheaper than PCFSoft, visually comparable at campus scale
   host.appendChild(renderer.domElement);
 
   const scene = new T.Scene();
@@ -431,7 +449,7 @@
   scene.add(hemi);
   const sunLight = new T.DirectionalLight(0xfff4df, 2.35);
   sunLight.castShadow = true;
-  const shadowRes = (qualityTier === 'low') ? 1024 : 2048;
+  const shadowRes = shadowResolutionFor(qualityMode);
   sunLight.shadow.mapSize.set(shadowRes, shadowRes);
   sunLight.shadow.camera.left = -900;
   sunLight.shadow.camera.right = 900;
@@ -452,7 +470,7 @@
     ? window.createUnrealFX({ renderer, scene, camera, sunLight, hemi, ambLight })
     : null;
   unrealFXRef = unrealFX;
-  if (qualityTier === 'low' || qualityMode === 'low') { if (unrealFX) unrealFX.setPostEnabled(false); }
+  if (unrealFX) unrealFX.setPostEnabled(qualityMode === 'high');
   const sharedUniforms = unrealFX ? unrealFX.sharedUniforms : {
     uTime: { value: 0 },
     uSunDir: { value: new T.Vector3(0.5, 0.76, 0.41).normalize() },
@@ -2660,80 +2678,96 @@
     const treePalette = ['#23491e', '#2e5825', '#1d401b', '#38632b', '#274f21', '#426d31'].map(c => new T.Color(c));
 
     // Broadleaf InstancedMesh
-    const bCount = broadleafList.length;
-    const canopyMesh = new T.InstancedMesh(canopyGeo, canopyMat, bCount);
-    canopyMesh.castShadow = true; canopyMesh.receiveShadow = true; canopyMesh.frustumCulled = false;
-    const trunkMesh = new T.InstancedMesh(trunkGeo, trunkMat, bCount);
-    trunkMesh.castShadow = true; trunkMesh.receiveShadow = true; trunkMesh.frustumCulled = false;
-    for (let i = 0; i < bCount; i++) {
-      const t = broadleafList[i];
-      dummy.position.set(t[0], t[2], t[1]);
-      dummy.rotation.set(0, t[4], 0);
-      dummy.scale.set(t[3] * 0.90, t[3] * 0.96, t[3] * 0.90);
-      dummy.updateMatrix();
-      canopyMesh.setMatrixAt(i, dummy.matrix);
-      trunkMesh.setMatrixAt(i, dummy.matrix);
-      canopyMesh.setColorAt(i, treePalette[t[5] % treePalette.length]);
+    // Split vegetation into spatial batches so a street-level camera does not
+    // submit the whole 2 km forest on every frame. Vegetation stays lit by the
+    // sun and terrain; excluding it from the shadow pass saves a large amount
+    // of work on integrated GPUs.
+    const vegetationCell = 360;
+    function forEachVegetationCell(list, build) {
+      const cells = new Map();
+      for (const item of list) {
+        const cx = Math.floor((item[0] + GW / 2) / vegetationCell);
+        const cz = Math.floor((item[1] + GH / 2) / vegetationCell);
+        const key = cx + ',' + cz;
+        let items = cells.get(key);
+        if (!items) { items = []; cells.set(key, items); }
+        items.push(item);
+      }
+      for (const items of cells.values()) build(items);
     }
-    canopyMesh.instanceMatrix.needsUpdate = true;
-    trunkMesh.instanceMatrix.needsUpdate = true;
-    if (canopyMesh.instanceColor) canopyMesh.instanceColor.needsUpdate = true;
-    treeGroup.add(trunkMesh, canopyMesh);
+    function finishVegetationMesh(mesh) {
+      mesh.castShadow = false;
+      mesh.receiveShadow = false;
+      mesh.frustumCulled = true;
+      mesh.instanceMatrix.needsUpdate = true;
+      if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+      if (mesh.computeBoundingSphere) mesh.computeBoundingSphere();
+      treeGroup.add(mesh);
+    }
+    forEachVegetationCell(broadleafList, items => {
+      const canopyMesh = new T.InstancedMesh(canopyGeo, canopyMat, items.length);
+      const trunkMesh = new T.InstancedMesh(trunkGeo, trunkMat, items.length);
+      for (let i = 0; i < items.length; i++) {
+        const t = items[i];
+        dummy.position.set(t[0], t[2], t[1]);
+        dummy.rotation.set(0, t[4], 0);
+        dummy.scale.set(t[3] * 0.90, t[3] * 0.96, t[3] * 0.90);
+        dummy.updateMatrix();
+        canopyMesh.setMatrixAt(i, dummy.matrix);
+        trunkMesh.setMatrixAt(i, dummy.matrix);
+        canopyMesh.setColorAt(i, treePalette[t[5] % treePalette.length]);
+      }
+      finishVegetationMesh(trunkMesh);
+      finishVegetationMesh(canopyMesh);
+    });
 
-    // Kerala Palm InstancedMesh
-    if (palmList.length) {
-      const pCount = palmList.length;
-      const pTrunks = new T.InstancedMesh(palmTrunkGeo, palmTrunkMat, pCount);
-      pTrunks.castShadow = true; pTrunks.receiveShadow = true; pTrunks.frustumCulled = false;
-      const pCrowns = new T.InstancedMesh(palmCrownGeo, palmCrownMat, pCount);
-      pCrowns.castShadow = true; pCrowns.receiveShadow = true; pCrowns.frustumCulled = false;
-      for (let i = 0; i < pCount; i++) {
-        const p = palmList[i];
+    // Kerala palms, roadside shrubs and laterite boulders use the same
+    // camera-visible chunking as the broadleaf canopy.
+    forEachVegetationCell(palmList, items => {
+      const trunks = new T.InstancedMesh(palmTrunkGeo, palmTrunkMat, items.length);
+      const crowns = new T.InstancedMesh(palmCrownGeo, palmCrownMat, items.length);
+      for (let i = 0; i < items.length; i++) {
+        const p = items[i];
         dummy.position.set(p[0], p[2], p[1]);
         dummy.rotation.set(0, p[4], 0);
         dummy.scale.setScalar(p[3]);
         dummy.updateMatrix();
-        pTrunks.setMatrixAt(i, dummy.matrix);
-        pCrowns.setMatrixAt(i, dummy.matrix);
+        trunks.setMatrixAt(i, dummy.matrix);
+        crowns.setMatrixAt(i, dummy.matrix);
       }
-      pTrunks.instanceMatrix.needsUpdate = true;
-      pCrowns.instanceMatrix.needsUpdate = true;
-      treeGroup.add(pTrunks, pCrowns);
-    }
+      finishVegetationMesh(trunks);
+      finishVegetationMesh(crowns);
+    });
 
-    // Roadside Shrubs & Laterite Boulders (crucial for Unreal ground-level detail!)
-    if (shrubList.length) {
-      const sMesh = new T.InstancedMesh(canopyGeo, canopyMat, shrubList.length);
-      sMesh.castShadow = true; sMesh.receiveShadow = true; sMesh.frustumCulled = false;
-      for (let i = 0; i < shrubList.length; i++) {
-        const s = shrubList[i];
+    forEachVegetationCell(shrubList, items => {
+      const mesh = new T.InstancedMesh(canopyGeo, canopyMat, items.length);
+      for (let i = 0; i < items.length; i++) {
+        const s = items[i];
         dummy.position.set(s[0], s[2] - s[3] * 0.32, s[1]);
         dummy.rotation.set(0, s[4], 0);
         dummy.scale.set(s[3] * 1.35, s[3] * 0.85, s[3] * 1.35);
         dummy.updateMatrix();
-        sMesh.setMatrixAt(i, dummy.matrix);
-        sMesh.setColorAt(i, treePalette[(s[5] + 1) % treePalette.length]);
+        mesh.setMatrixAt(i, dummy.matrix);
+        mesh.setColorAt(i, treePalette[(s[5] + 1) % treePalette.length]);
       }
-      sMesh.instanceMatrix.needsUpdate = true;
-      if (sMesh.instanceColor) sMesh.instanceColor.needsUpdate = true;
-      treeGroup.add(sMesh);
-    }
+      finishVegetationMesh(mesh);
+    });
 
     if (rockList.length) {
-      let rGeo = new T.DodecahedronGeometry(0.65, 0);
-      if (rGeo.index) rGeo = rGeo.toNonIndexed();
-      const rMesh = new T.InstancedMesh(rGeo, foundationMat, rockList.length);
-      rMesh.castShadow = true; rMesh.receiveShadow = true; rMesh.frustumCulled = false;
-      for (let i = 0; i < rockList.length; i++) {
-        const rk = rockList[i];
-        dummy.position.set(rk[0], rk[2], rk[1]);
-        dummy.rotation.set(rk[4] * 0.3, rk[4], rk[4] * 0.2);
-        dummy.scale.set(rk[3] * 1.3, rk[3] * 0.72, rk[3]);
-        dummy.updateMatrix();
-        rMesh.setMatrixAt(i, dummy.matrix);
-      }
-      rMesh.instanceMatrix.needsUpdate = true;
-      treeGroup.add(rMesh);
+      let rockGeo = new T.DodecahedronGeometry(0.65, 0);
+      if (rockGeo.index) rockGeo = rockGeo.toNonIndexed();
+      forEachVegetationCell(rockList, items => {
+        const mesh = new T.InstancedMesh(rockGeo, foundationMat, items.length);
+        for (let i = 0; i < items.length; i++) {
+          const rk = items[i];
+          dummy.position.set(rk[0], rk[2], rk[1]);
+          dummy.rotation.set(rk[4] * 0.3, rk[4], rk[4] * 0.2);
+          dummy.scale.set(rk[3] * 1.3, rk[3] * 0.72, rk[3]);
+          dummy.updateMatrix();
+          mesh.setMatrixAt(i, dummy.matrix);
+        }
+        finishVegetationMesh(mesh);
+      });
     }
   }
 
@@ -3119,6 +3153,8 @@
 
   window.addEventListener('keydown', e => {
     if (e.target && /input|textarea|select/i.test(e.target.tagName)) return;
+    if (e.key === 'Escape' && navOpen) { e.preventDefault(); closeNavmap(); return; }
+    if (e.key === 'n' || e.key === 'N') { e.preventDefault(); toggleNavmap(); return; }
     if (state.cameraExternal) return; // Shuttle driving mode handles its own keys
     if (e.key === 'Escape') {
       closeModal();
@@ -3229,6 +3265,456 @@
   }
   if (fpsBtn) fpsBtn.addEventListener('click', () => setFpsVisible(!fpsVisible));
 
+  // ================= 2D NAVIGATION MAP (fullscreen vector map) =================
+  const navmap = document.getElementById('navmap');
+  const navCanvas = document.getElementById('navmap-canvas');
+  const navCtx = navCanvas ? navCanvas.getContext('2d') : null;
+  const navClose = document.getElementById('navmap-close');
+  const navChips = document.getElementById('navmap-chips');
+  const navRouteName = document.getElementById('navmap-route-name');
+  const navRouteCount = document.getElementById('navmap-route-count');
+  const navStops = document.getElementById('navmap-stops');
+  const navDrive = document.getElementById('navmap-drive');
+  const minimapCard = document.getElementById('minimap-card');
+  const navView = { cx: 0, cz: 0, scale: 0.3, dragging: false, dragMoved: false, lastX: 0, lastY: 0, selRoute: 'all', flashStop: -1, flashAt: 0, showTraffic: true, showNames: true };
+  const navTrafficBtn = document.getElementById('nav-traffic');
+  const navNamesBtn = document.getElementById('nav-names');
+  const navCenterBtn = document.getElementById('nav-center-player');
+  function navToggle(btn, on) {
+    if (btn) btn.classList.toggle('on', on);
+  }
+  if (navTrafficBtn) navTrafficBtn.addEventListener('click', () => { navView.showTraffic = !navView.showTraffic; navToggle(navTrafficBtn, navView.showTraffic); });
+  if (navNamesBtn) navNamesBtn.addEventListener('click', () => { navView.showNames = !navView.showNames; navToggle(navNamesBtn, navView.showNames); });
+  let navOpen = false;
+  let navRaf = 0, navLastDraw = 0, navFrame = 0;
+
+  function navResize() {
+    if (!navCanvas) return;
+    const dpr = Math.min(1.5, window.devicePixelRatio || 1);
+    navCanvas.width = Math.floor(window.innerWidth * dpr);
+    navCanvas.height = Math.floor(window.innerHeight * dpr);
+    navView.dpr = dpr;
+  }
+
+  function routesInfo() {
+    try { return window.ShuttleGame && window.ShuttleGame.getRoutesInfo ? window.ShuttleGame.getRoutesInfo() : null; }
+    catch (_) { return null; }
+  }
+
+  function navWorldToScreen(x, z) {
+    const W = navCanvas.width, H = navCanvas.height;
+    return {
+      x: (x - navView.cx) * navView.scale + W / 2,
+      y: (z - navView.cz) * navView.scale + H / 2
+    };
+  }
+  function navScreenToWorld(sx, sy) {
+    const W = navCanvas.width, H = navCanvas.height;
+    return {
+      x: (sx - W / 2) / navView.scale + navView.cx,
+      z: (sy - H / 2) / navView.scale + navView.cz
+    };
+  }
+
+  function navFitAll() {
+    const pad = 1.06;
+    navView.cx = 0; navView.cz = 20;
+    navView.scale = Math.min(navCanvas.width / (GW * pad), navCanvas.height / (GH * pad));
+  }
+  function navCenterOn(x, z, scale) {
+    navView.cx = x; navView.cz = z;
+    if (scale) navView.scale = scale;
+  }
+
+  function navBuildChips() {
+    const info = routesInfo();
+    if (!info || !navChips) return;
+    for (const chip of Array.from(navChips.querySelectorAll('[data-route]:not([data-route="all"])'))) chip.remove();
+    for (const r of info.routes) {
+      const b = document.createElement('button');
+      b.className = 'nav-chip';
+      b.type = 'button';
+      b.dataset.route = String(r.index);
+      b.innerHTML = '<i class="nav-chip-dot" style="background:' + r.color + '"></i>' + r.id;
+      navChips.appendChild(b);
+    }
+    navChips.querySelectorAll('[data-route]').forEach(chip => {
+      chip.addEventListener('click', () => navSelectRoute(chip.dataset.route));
+    });
+  }
+
+  function navSelectRoute(sel) {
+    navView.selRoute = sel;
+    if (navChips) {
+      navChips.querySelectorAll('[data-route]').forEach(chip => {
+        chip.classList.toggle('on', chip.dataset.route === String(sel));
+      });
+    }
+    const info = routesInfo();
+    if (!info) return;
+    if (sel === 'all') {
+      navRouteName.textContent = 'All shuttle routes';
+      navRouteCount.textContent = info.routes.length + ' routes · ' + info.routes.reduce((n, r) => n + r.stops.length, 0) + ' stops';
+      if (navStops) {
+        navStops.innerHTML = '<li class="navmap-hint-block">Pick a route chip above, or click any stop dot on the map to inspect it. The live bus is tracked with a gold arrow.</li>';
+      }
+      if (navDrive) navDrive.disabled = true;
+      navDrive.textContent = 'Drive this route';
+    } else {
+      const r = info.routes[+sel];
+      navRouteName.textContent = r.name;
+      navRouteCount.textContent = r.stops.length + ' stops · loop';
+      navRenderStopList(r);
+      if (navDrive) navDrive.disabled = false;
+      navDrive.textContent = 'Drive ' + r.id + ' now';
+    }
+  }
+
+  function navRenderStopList(route) {
+    if (!navStops) return;
+    let html = '';
+    route.stops.forEach((st, i) => {
+      html += '<li><button class="navmap-stop" type="button" data-stop="' + i + '">' +
+        '<span class="stop-idx" style="background:' + route.color + '">' + (i + 1) + '</span>' +
+        '<span class="stop-name">' + st.name + '</span>' +
+        '<span class="stop-dist" data-dist="' + i + '"></span>' +
+        '</button></li>';
+    });
+    navStops.innerHTML = html;
+    navStops.querySelectorAll('.navmap-stop').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const i = +btn.dataset.stop;
+        const st = route.stops[i];
+        navCenterOn(st.x, st.z, Math.max(navView.scale, 1.15));
+        navView.flashStop = i;
+        navView.flashAt = performance.now();
+      });
+    });
+  }
+
+  function navDrawRoute(r, active) {
+    if (!r) return;
+    navCtx.save();
+    navCtx.globalAlpha = active ? 1.0 : 0.16;
+    navCtx.strokeStyle = r.color;
+    navCtx.lineWidth = active ? 4.5 : 3.0;
+    navCtx.lineJoin = 'round';
+    navCtx.lineCap = 'round';
+    if (active) { navCtx.shadowColor = r.color; navCtx.shadowBlur = 10; }
+    navCtx.beginPath();
+    r.stops.forEach((st, i) => {
+      const p = navWorldToScreen(st.x, st.z);
+      if (i === 0) navCtx.moveTo(p.x, p.y); else navCtx.lineTo(p.x, p.y);
+    });
+    navCtx.closePath();
+    navCtx.stroke();
+    navCtx.restore();
+  }
+
+  function drawNavmap() {
+    if (!navOpen || !navCtx) return;
+    navRaf = requestAnimationFrame(drawNavmap);
+    navFrame++;
+    if (navFrame % 2) return; // ~30 fps is plenty for a 2D map
+    const W = navCanvas.width, H = navCanvas.height;
+    if (!W || !H) return;
+
+    drawVectorMap(navCtx, {
+      X: (x) => (x - navView.cx) * navView.scale + W / 2,
+      Y: (z) => (z - navView.cz) * navView.scale + H / 2,
+      pxPerM: navView.scale,
+      w: W, h: H,
+      detail: 'full'
+    });
+
+    const info = routesInfo();
+    const sel = navView.selRoute;
+    if (info) {
+      // Inactive routes first, selected/active route on top
+      for (const r of info.routes) {
+        const active = sel === 'all' || +sel === r.index;
+        navDrawRoute(r, active);
+        if (sel === 'all') {
+          navCtx.save();
+          navCtx.globalAlpha = 0.9;
+          for (let i = 0; i < r.stops.length; i++) {
+            const p = navWorldToScreen(r.stops[i].x, r.stops[i].z);
+            navCtx.beginPath();
+            navCtx.arc(p.x, p.y, 4.2, 0, Math.PI * 2);
+            navCtx.fillStyle = r.color;
+            navCtx.fill();
+            navCtx.lineWidth = 1.2;
+            navCtx.strokeStyle = '#101713';
+            navCtx.stroke();
+          }
+          navCtx.restore();
+        }
+      }
+      if (sel !== 'all') {
+        const r = info.routes[+sel];
+        const tNow = performance.now();
+        r.stops.forEach((st, i) => {
+          const p = navWorldToScreen(st.x, st.z);
+          const flash = (navView.flashStop === i && tNow - navView.flashAt < 1600);
+          const rad = flash ? 9 + Math.sin(tNow * 0.012) * 3 : 7;
+          navCtx.save();
+          navCtx.beginPath();
+          navCtx.arc(p.x, p.y, rad + 3.5, 0, Math.PI * 2);
+          navCtx.fillStyle = 'rgba(0,0,0,0.45)';
+          navCtx.fill();
+          navCtx.beginPath();
+          navCtx.arc(p.x, p.y, rad, 0, Math.PI * 2);
+          navCtx.fillStyle = r.color;
+          navCtx.fill();
+          navCtx.lineWidth = 1.6;
+          navCtx.strokeStyle = '#101713';
+          navCtx.stroke();
+          if (navView.scale > 0.42) {
+            navCtx.fillStyle = '#0d130f';
+            navCtx.font = '700 ' + Math.max(9, Math.floor(rad * 1.15)) + 'px system-ui, sans-serif';
+            navCtx.textAlign = 'center';
+            navCtx.textBaseline = 'middle';
+            navCtx.fillText(String(i + 1), p.x, p.y + 0.5);
+          }
+          if (navView.scale > 0.9) {
+            navCtx.fillStyle = 'rgba(244,239,227,0.92)';
+            navCtx.font = '11px system-ui, sans-serif';
+            navCtx.textAlign = 'left';
+            navCtx.fillText(st.name, p.x + rad + 5, p.y + 1);
+          }
+          navCtx.restore();
+        });
+      }
+    }
+
+    // Live traffic + other multiplayer drivers
+    const sgLive = window.ShuttleGame;
+    if (navView.showTraffic && sgLive && sgLive.getTraffic) {
+      for (const c of sgLive.getTraffic()) {
+        const p = navWorldToScreen(c.x, c.z);
+        if (p.x < -10 || p.y < -10 || p.x > W + 10 || p.y > H + 10) continue;
+        navCtx.fillStyle = 'rgba(240,230,200,0.75)';
+        navCtx.beginPath();
+        navCtx.arc(p.x, p.y, 2.6, 0, Math.PI * 2);
+        navCtx.fill();
+      }
+    }
+    if (sgLive && sgLive.getFuelStations) {
+      for (const station of sgLive.getFuelStations()) {
+        const p = navWorldToScreen(station.x, station.z);
+        if (p.x < -30 || p.y < -30 || p.x > W + 30 || p.y > H + 30) continue;
+        navCtx.save();
+        navCtx.translate(p.x, p.y);
+        navCtx.fillStyle = '#45d8e8';
+        navCtx.strokeStyle = '#071417';
+        navCtx.lineWidth = 1.8;
+        navCtx.beginPath();
+        navCtx.arc(0, 0, 7.2, 0, Math.PI * 2);
+        navCtx.fill();
+        navCtx.stroke();
+        navCtx.fillStyle = '#062025';
+        navCtx.font = '800 9px system-ui, sans-serif';
+        navCtx.textAlign = 'center';
+        navCtx.textBaseline = 'middle';
+        navCtx.fillText('F', 0, 0.5);
+        if (navView.scale > 0.55) {
+          navCtx.font = '700 10px system-ui, sans-serif';
+          navCtx.textAlign = 'left';
+          navCtx.fillStyle = '#c6f6fa';
+          navCtx.fillText(station.name, 11, 3);
+        }
+        navCtx.restore();
+      }
+    }
+    if (sgLive && sgLive.getPeers) {
+      const PLAYER_COLORS_JS = ['#2b7bf6', '#ff4d4d', '#2ce080', '#ffb020', '#a463ff', '#24d2ee', '#ff7442', '#ff5cb8'];
+      for (const pmp of sgLive.getPeers()) {
+        const p = navWorldToScreen(pmp.x, pmp.z);
+        if (p.x < -30 || p.y < -30 || p.x > W + 30 || p.y > H + 30) continue;
+        const color = PLAYER_COLORS_JS[(pmp.colorIdx | 0) % PLAYER_COLORS_JS.length];
+        navCtx.save();
+        navCtx.translate(p.x, p.y);
+        // The marker points down for +Z; positive game yaw turns toward +X.
+        navCtx.rotate(-(pmp.heading || 0));
+        navCtx.beginPath();
+        navCtx.moveTo(0, 8);
+        navCtx.lineTo(5.6, -6);
+        navCtx.lineTo(0, -3.2);
+        navCtx.lineTo(-5.6, -6);
+        navCtx.closePath();
+        navCtx.fillStyle = color;
+        navCtx.strokeStyle = 'rgba(0,0,0,0.7)';
+        navCtx.lineWidth = 1.4;
+        navCtx.fill();
+        navCtx.stroke();
+        navCtx.restore();
+        if (navView.showNames) {
+          navCtx.fillStyle = 'rgba(13,19,15,0.82)';
+          const label = pmp.name || 'Driver';
+          navCtx.font = '700 10px system-ui, sans-serif';
+          const tw = navCtx.measureText(label).width;
+          const lx = p.x + 10, ly = p.y - 8;
+          navCtx.fillRect(lx - 3, ly - 8, tw + 6, 12);
+          navCtx.fillStyle = color;
+          navCtx.fillText(label, lx, ly);
+        }
+      }
+    }
+
+    // Live bus arrow (gold) + pulse ring
+    const sg = window.ShuttleGame;
+    const busState = sg && sg.getState ? sg.getState() : null;
+    if (busState) {
+      const p = navWorldToScreen(busState.x, busState.z);
+      const tNow = performance.now() * 0.0042;
+      navCtx.save();
+      navCtx.translate(p.x, p.y);
+      navCtx.beginPath();
+      navCtx.arc(0, 0, 10 + Math.sin(tNow) * 3.4, 0, Math.PI * 2);
+      navCtx.strokeStyle = 'rgba(255,198,110,0.5)';
+      navCtx.lineWidth = 2.4;
+      navCtx.stroke();
+      navCtx.rotate(-busState.heading);
+      navCtx.beginPath();
+      navCtx.moveTo(0, 11);
+      navCtx.lineTo(7.4, -7.6);
+      navCtx.lineTo(0, -4.0);
+      navCtx.lineTo(-7.4, -7.6);
+      navCtx.closePath();
+      navCtx.fillStyle = '#ffc66e';
+      navCtx.strokeStyle = '#241503';
+      navCtx.lineWidth = 1.6;
+      navCtx.fill();
+      navCtx.stroke();
+      navCtx.restore();
+    }
+
+    // Live distance readouts in the stop list (twice a second)
+    navFrame % 30 === 0 && navRefreshDistances();
+  }
+
+  function navRefreshDistances() {
+    if (!navStops || !window.ShuttleGame || !window.ShuttleGame.getState) return;
+    const busState = window.ShuttleGame.getState();
+    const info = routesInfo();
+    if (!info || navView.selRoute === 'all') return;
+    const r = info.routes[+navView.selRoute];
+    if (!r) return;
+    navStops.querySelectorAll('[data-dist]').forEach(el => {
+      const st = r.stops[+el.dataset.dist];
+      if (st) el.textContent = Math.round(Math.hypot(busState.x - st.x, busState.z - st.z)) + ' m';
+    });
+  }
+
+  function openNavmap() {
+    if (!navmap || !navCtx) return;
+    navOpen = true;
+    navmap.classList.remove('hidden');
+    navResize();
+    navView.cx = 0; navView.cz = 30;
+    if (window.ShuttleGame && window.ShuttleGame.getState && window.ShuttleGame.getState().active) {
+      const bs = window.ShuttleGame.getState();
+      navCenterOn(bs.x, bs.z, Math.max(navView.scale, 0.9));
+    } else {
+      navFitAll();
+    }
+    navBuildChips();
+    navSelectRoute(navView.selRoute || 'all');
+    cancelAnimationFrame(navRaf);
+    navRaf = requestAnimationFrame(drawNavmap);
+  }
+  function closeNavmap() {
+    navOpen = false;
+    if (navmap) navmap.classList.add('hidden');
+    cancelAnimationFrame(navRaf);
+  }
+  function toggleNavmap() { navOpen ? closeNavmap() : openNavmap(); }
+
+  if (navClose) navClose.addEventListener('click', closeNavmap);
+  if (navCenterBtn) navCenterBtn.addEventListener('click', () => {
+    const game = window.ShuttleGame;
+    const bus = game && game.getState ? game.getState() : null;
+    if (bus) navCenterOn(bus.x, bus.z, Math.max(navView.scale, 0.9));
+  });
+  if (navmap) {
+    navmap.addEventListener('pointerdown', (e) => {
+      if (e.target !== navCanvas) return;
+      navView.dragging = true;
+      navView.dragMoved = false;
+      navView.lastX = e.clientX; navView.lastY = e.clientY;
+      navCanvas.setPointerCapture(e.pointerId);
+    });
+    navmap.addEventListener('pointermove', (e) => {
+      if (!navView.dragging) return;
+      const dpr = navView.dpr || 1;
+      if (Math.abs(e.clientX - navView.lastX) + Math.abs(e.clientY - navView.lastY) > 2) navView.dragMoved = true;
+      navView.cx -= (e.clientX - navView.lastX) * dpr / navView.scale;
+      navView.cz -= (e.clientY - navView.lastY) * dpr / navView.scale;
+      navView.lastX = e.clientX; navView.lastY = e.clientY;
+    });
+    const endDrag = (e) => {
+      navView.dragging = false;
+      try { navCanvas.releasePointerCapture(e.pointerId); } catch (_) {}
+    };
+    navmap.addEventListener('pointerup', endDrag);
+    navmap.addEventListener('pointercancel', endDrag);
+    navCanvas.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      const W = navCanvas.width, H = navCanvas.height;
+      const before = navScreenToWorld(e.clientX * (navView.dpr || 1), e.clientY * (navView.dpr || 1));
+      const zoom = Math.exp(-e.deltaY * 0.0016);
+      navView.scale = clamp(navView.scale * zoom, 0.12, 6.5);
+      const after = navScreenToWorld(e.clientX * (navView.dpr || 1), e.clientY * (navView.dpr || 1));
+      navView.cx += before.x - after.x;
+      navView.cz += before.z - after.z;
+    }, { passive: false });
+    navCanvas.addEventListener('click', (e) => {
+      if (navView.dragMoved) { navView.dragMoved = false; return; }
+      const info = routesInfo();
+      if (!info) return;
+      const dpr = navView.dpr || 1;
+      const mx = e.clientX * dpr, my = e.clientY * dpr;
+      const lists = navView.selRoute === 'all' ? info.routes : [info.routes[+navView.selRoute]];
+      for (const r of lists) {
+        for (let i = 0; i < r.stops.length; i++) {
+          const p = navWorldToScreen(r.stops[i].x, r.stops[i].z);
+          if (Math.hypot(p.x - mx, p.y - my) < 14) {
+            navView.flashStop = i;
+            navView.flashAt = performance.now();
+            navSelectRoute(String(r.index));
+            navCenterOn(r.stops[i].x, r.stops[i].z, Math.max(navView.scale, 1.15));
+            if (navStops) {
+              const btn = navStops.querySelector('[data-stop="' + i + '"]');
+              if (btn) { btn.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); btn.classList.add('flash'); setTimeout(() => btn.classList.remove('flash'), 900); }
+            }
+            return;
+          }
+        }
+      }
+    });
+  }
+  if (navDrive) {
+    navDrive.addEventListener('click', () => {
+      const info = routesInfo();
+      if (!info || navView.selRoute === 'all') return;
+      const idx = +navView.selRoute;
+      if (window.ShuttleGame) {
+        if (window.ShuttleGame.selectRoute) window.ShuttleGame.selectRoute(idx);
+        if (window.ShuttleGame.enterDriveMode) window.ShuttleGame.enterDriveMode('route');
+      }
+      closeNavmap();
+    });
+  }
+  const openNavmapBtn = document.getElementById('open-navmap');
+  if (openNavmapBtn) openNavmapBtn.addEventListener('click', openNavmap);
+
+  if (minimapCard) {
+    minimapCard.style.cursor = 'pointer';
+    minimapCard.title = 'Double-click for 2D navigation map';
+    minimapCard.addEventListener('dblclick', openNavmap);
+  }
+  window.addEventListener('resize', () => { if (navOpen) navResize(); });
+
   document.getElementById('info-close').addEventListener('click', deselect);
   document.getElementById('info-dismiss').addEventListener('click', deselect);
 
@@ -3323,52 +3809,123 @@
   function miniX(x) { return (x + GW / 2) / GW * MINI_W; }
   function miniY(z) { return (z + GH / 2) / GH * MINI_H; }
 
-  function buildMinimapBase() {
-    mbctx.clearRect(0, 0, MINI_W, MINI_H);
-    mbctx.fillStyle = '#1e2c1b';
-    mbctx.fillRect(0, 0, MINI_W, MINI_H);
-    if (satImage) {
-      try { mbctx.drawImage(satImage, 0, 0, MINI_W, MINI_H); } catch (e) {}
+  // Shared procedural 2D vector renderer (dark nav style) used by the minimap and the fullscreen navigation map
+  // xform: { X, Y, pxPerM, w, h, detail: 'full' | 'mini' }
+  function drawVectorMap(ctx, xform) {
+    const { X, Y, pxPerM, w, h, detail } = xform;
+    const full = detail === 'full';
+    const ringPath = (poly) => {
+      ctx.beginPath();
+      poly.forEach((p, i) => { const x = X(p[0]), y = Y(p[1]); if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y); });
+      ctx.closePath();
+    };
+
+    // Background: baked land tint + subtle vignette glow
+    ctx.fillStyle = '#0e1a13';
+    ctx.fillRect(0, 0, w, h);
+    if (full) {
+      const g = ctx.createRadialGradient(w * 0.5, h * 0.42, 40, w * 0.5, h * 0.5, Math.max(w, h) * 0.75);
+      g.addColorStop(0, 'rgba(46,74,56,0.35)');
+      g.addColorStop(1, 'rgba(8,14,11,0)');
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, w, h);
     }
-    // Draw Campus Waterbody on minimap
-    mbctx.fillStyle = 'rgba(42,135,148,0.85)';
-    for (const w of D.water) {
-      mbctx.beginPath();
-      w.polygon.forEach((p, i) => { const x = miniX(p[0]), y = miniY(p[1]); if (i) mbctx.lineTo(x, y); else mbctx.moveTo(x, y); });
-      mbctx.closePath();
-      mbctx.fill();
+
+    // Sports pitches & parking
+    ctx.fillStyle = 'rgba(58,102,62,0.5)';
+    for (const p of D.pitches) { ringPath(p.polygon); ctx.fill(); }
+    ctx.fillStyle = 'rgba(148,156,168,0.34)';
+    for (const p of D.parking) { ringPath(p.polygon); ctx.fill(); }
+
+    // Water bodies (check-dam lake etc.)
+    for (const wat of D.water) {
+      ringPath(wat.polygon);
+      ctx.fillStyle = '#123b44';
+      ctx.fill();
+      ctx.strokeStyle = '#2f7d8c';
+      ctx.lineWidth = Math.max(1, 1.4 * pxPerM);
+      ctx.stroke();
     }
-    if (D.boundary && D.boundary.length) {
-      mbctx.beginPath();
-      D.boundary.forEach((p, i) => { const x = miniX(p[0]), y = miniY(p[1]); if (i) mbctx.lineTo(x, y); else mbctx.moveTo(x, y); });
-      mbctx.closePath();
-      mbctx.strokeStyle = 'rgba(238,192,112,0.85)';
-      mbctx.lineWidth = 1.4;
-      mbctx.stroke();
+
+    // Campus boundary (planned)
+    if (D.boundary && D.boundary.length > 2) {
+      ringPath(D.boundary);
+      ctx.strokeStyle = 'rgba(238,192,112,0.6)';
+      ctx.lineWidth = Math.max(1.2, 1.6 * pxPerM);
+      ctx.setLineDash([6, 5]);
+      ctx.stroke();
+      ctx.setLineDash([]);
     }
-    // Draw complete campus road network on minimap
-    mbctx.lineCap = 'round';
-    mbctx.lineJoin = 'round';
-    for (const r of D.roads) {
-      if (!r.pts || r.pts.length < 2) continue;
-      mbctx.beginPath();
-      r.pts.forEach((p, i) => { const x = miniX(p[0]), y = miniY(p[1]); if (i) mbctx.lineTo(x, y); else mbctx.moveTo(x, y); });
-      if (r.isDriveable) {
-        mbctx.strokeStyle = 'rgba(218,224,232,0.58)';
-        mbctx.lineWidth = r.width >= 6.0 ? 1.8 : 1.25;
-      } else {
-        mbctx.strokeStyle = 'rgba(214,186,142,0.34)';
-        mbctx.lineWidth = 0.7;
-      }
-      mbctx.stroke();
-    }
-    mbctx.fillStyle = 'rgba(250,242,219,0.68)';
+
+    // Buildings
+    ctx.fillStyle = '#33413a';
+    ctx.strokeStyle = 'rgba(255,255,255,0.10)';
+    ctx.lineWidth = 1;
     for (const b of D.buildings) {
-      mbctx.beginPath();
-      b.footprint.forEach((p, i) => { const x = miniX(p[0]), y = miniY(p[1]); if (i) mbctx.lineTo(x, y); else mbctx.moveTo(x, y); });
-      mbctx.closePath();
-      mbctx.fill();
+      ringPath(b.footprint);
+      ctx.fill();
+      if (full && pxPerM > 0.5) ctx.stroke();
     }
+
+    // Roads: minor/service first (dark casing + faint infill), then driveable mains on top
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    const traceRoad = (r) => {
+      ctx.beginPath();
+      r.pts.forEach((p, i) => { const x = X(p[0]), y = Y(p[1]); if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y); });
+    };
+    for (const r of D.roads) {
+      if (!r.pts || r.pts.length < 2 || r.isDriveable) continue;
+      traceRoad(r);
+      ctx.strokeStyle = '#22302a';
+      ctx.lineWidth = Math.max(1, (r.width || 2) * pxPerM);
+      ctx.stroke();
+    }
+    for (const r of D.roads) {
+      if (!r.pts || r.pts.length < 2 || !r.isDriveable) continue;
+      const wpx = Math.max(1.4, (r.width || 5) * pxPerM);
+      traceRoad(r);
+      ctx.strokeStyle = '#0a120d';
+      ctx.lineWidth = wpx + Math.max(1.2, 2.4 * pxPerM);
+      ctx.stroke();
+      traceRoad(r);
+      ctx.strokeStyle = (r.width || 5) >= 8.0 ? '#8fd3e8' : '#b9cdb0';
+      ctx.lineWidth = wpx;
+      ctx.stroke();
+      // Subtle centre dashes on main campus spine & highway when zoomed in
+      if (full && pxPerM > 0.9 && (r.width || 5) >= 5.0) {
+        traceRoad(r);
+        ctx.strokeStyle = 'rgba(20,26,21,0.75)';
+        ctx.lineWidth = Math.max(1, wpx * 0.09);
+        ctx.setLineDash([7 * pxPerM * 2, 9 * pxPerM * 2]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+    }
+
+    // Main Gate marker
+    const gx = X(185.47), gy = Y(548.84);
+    ctx.save();
+    ctx.translate(gx, gy);
+    ctx.fillStyle = '#ffc66e';
+    ctx.strokeStyle = '#201503';
+    ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    for (let i = 0; i < 10; i++) {
+      const a = -Math.PI / 2 + (i * Math.PI) / 5;
+      const r = i % 2 === 0 ? 7 : 3.1;
+      ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r);
+    }
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function buildMinimapBase() {
+    const pxPerM = MINI_W / GW;
+    mbctx.clearRect(0, 0, MINI_W, MINI_H);
+    drawVectorMap(mbctx, { X: miniX, Y: miniY, pxPerM, w: MINI_W, h: MINI_H, detail: 'mini' });
   }
 
   const minimapHooks = [];
@@ -3425,16 +3982,22 @@
   const arcadeFadeCenter = new T.Vector3(255, 150, 454);
   const shadowFocus = new T.Vector3();
 
-  function animate() {
+  let lastFrameAt = 0;
+  function animate(frameAt) {
     requestAnimationFrame(animate);
-    const dt = Math.min(clock.getDelta(), 0.05);
+    // Cap high-refresh displays at 60 fps. A single, even frame cadence keeps
+    // input and the vehicle loop predictable while reducing laptop GPU load.
+    if (frameAt && frameAt - lastFrameAt < 16.5) return;
+    if (frameAt) lastFrameAt = frameAt;
+    const frameDt = clock.getDelta();
+    const dt = Math.min(frameDt, 0.05);
     const elapsed = clock.elapsedTime;
 
     for (let i = 0; i < frameListeners.length; i++) frameListeners[i](dt, elapsed);
 
-    updateCamera(dt);
+    if (!navOpen) updateCamera(dt);
     // Adaptive resolution: shed render scale when frames get expensive (auto mode only)
-    perf.ema = perf.ema * 0.94 + dt * 0.06;
+    perf.ema = perf.ema * 0.88 + frameDt * 0.12;
     if (fpsVisible) {
       fpsTimer += dt;
       if (fpsTimer > 0.5) {
@@ -3442,14 +4005,14 @@
         fpsBadge.textContent = Math.round(1 / Math.max(perf.ema, 1e-4)) + ' FPS · ' + effectivePixelRatio().toFixed(2) + 'x';
       }
     }
-    if (qualityMode === 'auto' && elapsed - perf.lastAdjust > 2.0) {
+    if (!navOpen && qualityMode === 'auto' && elapsed - perf.lastAdjust > 1.25) {
       perf.lastAdjust = elapsed;
       const fps = 1 / Math.max(perf.ema, 1e-4);
-      if (fps < 42 && perf.scale > 0.62) {
-        perf.scale = Math.max(0.62, perf.scale - 0.15);
+      if (fps < 48 && perf.scale > 0.45) {
+        perf.scale = Math.max(0.45, perf.scale - 0.12);
         renderer.setPixelRatio(effectivePixelRatio());
-      } else if (fps > 57 && perf.scale < 1) {
-        perf.scale = Math.min(1, perf.scale + 0.12);
+      } else if (fps > 58 && perf.scale < 1) {
+        perf.scale = Math.min(1, perf.scale + 0.04);
         renderer.setPixelRatio(effectivePixelRatio());
       }
     }
@@ -3468,19 +4031,27 @@
       const target = d < 180 ? 0.12 + 0.15 * fade : 1.0;
       for (let i = 0; i < arcadeOccluders.length; i++) arcadeOccluders[i].material.opacity = target;
     }
-    updateLabels();
-    updateReadout();
-    updateSelection(elapsed);
+    if (!navOpen) {
+      updateLabels();
+      updateReadout();
+      updateSelection(elapsed);
+    }
 
     if (waterMats.length) {
       waterNormalTex.offset.x = (elapsed * 0.018) % 1;
       waterNormalTex.offset.y = (elapsed * 0.012) % 1;
     }
 
-    updateMinimap();
-    updateScale();
+    if (!navOpen) {
+      updateMinimap();
+      updateScale();
+    }
 
-    if (state.cameraExternal && window.ShuttleGame && window.ShuttleGame.getFocusPosition) {
+    if (navOpen) {
+      // The live vector map tracks the game state; rendering the hidden 3D
+      // canvas at the same time wastes fill rate and causes avoidable heat.
+      return;
+    } else if (state.cameraExternal && window.ShuttleGame && window.ShuttleGame.getFocusPosition) {
       shadowFocus.copy(window.ShuttleGame.getFocusPosition());
       if (unrealFX) unrealFX.render(elapsed, shadowFocus, 155);
       else renderer.render(scene, camera);
