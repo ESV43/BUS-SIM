@@ -361,9 +361,11 @@
   }
 
   // --- 2. RENDERER, SCENE, LIGHTING & UNREAL FX ---
+  let treesEnabled = true;
+  try { treesEnabled = localStorage.getItem('iiser.trees') !== 'off'; } catch (_) {}
   const state = {
     labels: 'key',
-    trees: true,
+    trees: treesEnabled,
     boundary: false,
     selected: null,
     cameraExternal: false,
@@ -3219,11 +3221,13 @@
   function setTrees(on) {
     state.trees = on;
     treeGroup.visible = on;
+    try { localStorage.setItem('iiser.trees', on ? 'on' : 'off'); } catch (_) {}
     if (treesBtn) {
       treesBtn.classList.toggle('on', on);
       treesBtn.querySelector('em').textContent = on ? 'On' : 'Off';
     }
     renderer.shadowMap.needsUpdate = true;
+    window.dispatchEvent(new CustomEvent('iiser:trees', { detail: on }));
   }
   function toggleTrees() { setTrees(!state.trees); }
   if (treesBtn) treesBtn.addEventListener('click', toggleTrees);
@@ -3290,7 +3294,7 @@
   const navStops = document.getElementById('navmap-stops');
   const navDrive = document.getElementById('navmap-drive');
   const minimapCard = document.getElementById('minimap-card');
-  const navView = { cx: 0, cz: 0, scale: 0.3, dragging: false, dragMoved: false, lastX: 0, lastY: 0, selRoute: 'all', flashStop: -1, flashAt: 0, showTraffic: true, showNames: true };
+  const navView = { cx: 0, cz: 0, scale: 0.3, dragging: false, dragMoved: false, lastX: 0, lastY: 0, selRoute: 'active', flashStop: -1, flashAt: 0, showTraffic: false, showNames: true };
   const navTrafficBtn = document.getElementById('nav-traffic');
   const navNamesBtn = document.getElementById('nav-names');
   const navCenterBtn = document.getElementById('nav-center-player');
@@ -3446,7 +3450,7 @@
     if (info) {
       // Inactive routes first, selected/active route on top
       for (const r of info.routes) {
-        const active = sel === 'all' || +sel === r.index;
+        const active = sel !== 'all' && +sel === r.index;
         navDrawRoute(r, active);
         if (sel === 'all') {
           navCtx.save();
@@ -3633,6 +3637,8 @@
       navFitAll();
     }
     navBuildChips();
+    const routeInfo = routesInfo();
+    if (navView.selRoute === 'active' && routeInfo) navView.selRoute = String(routeInfo.activeIdx);
     navSelectRoute(navView.selRoute || 'all');
     cancelAnimationFrame(navRaf);
     navRaf = requestAnimationFrame(drawNavmap);
@@ -4080,6 +4086,7 @@
   setTimeout(() => { if (!forestBuilt) populateRealisticVegetation(null); }, 1800);
 
   applyLabels();
+  setTrees(state.trees);
   updateCamera(0);
   animate();
 
@@ -4090,6 +4097,8 @@
     buildingColliders, solidObstacles, isInsideOtherDriveableRoad, nightMaterials, unrealFX, state,
     onFrame(fn) { frameListeners.push(fn); },
     onMinimapDraw(fn) { minimapHooks.push(fn); },
+    setTrees,
+    getTreesEnabled() { return state.trees; },
     setExternalCamera(active) {
       state.cameraExternal = !!active;
       if (!active) {

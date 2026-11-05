@@ -87,6 +87,29 @@
         <span class="mc-blurb">8 drivers, one room code — cruise together</span>
       </button>
     </div>
+    <div class="driving-rule-card">
+      <label class="driving-rule" for="vehicle-needs-toggle">
+        <span class="driving-rule-copy">
+          <strong>Fuel &amp; health simulation</strong>
+          <small>Disable fuel use, health damage and breakdowns. Collision fines still apply.</small>
+        </span>
+        <input id="vehicle-needs-toggle" type="checkbox" checked>
+      </label>
+    </div>
+    <div class="drive-settings">
+      <div class="kicker">Graphics</div>
+      <div class="perf-row">
+        <label class="perf-label" for="quality-select">Quality</label>
+        <select id="quality-select" class="mp-input perf-select">
+          <option value="auto">Auto</option>
+          <option value="low">Low · smoothest</option>
+          <option value="medium">Medium</option>
+          <option value="high">High</option>
+        </select>
+      </div>
+      <button class="btn toggle on" id="layer-trees"><span>Tree canopy</span><em>On</em></button>
+      <div class="perf-hint">Turn off the canopy to improve performance · T</div>
+    </div>
     <div class="menu-foot">
       <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> drive ·
       <kbd>C</kbd> camera · <kbd>H</kbd> horn · <kbd>G</kbd> high beam · <kbd>B</kbd> hazards · <kbd>R</kbd> reset · <kbd>M</kbd> next mode · <kbd>Esc</kbd> exit
@@ -112,20 +135,10 @@
     <div class="group">
       <div class="kicker">Map Layers</div>
       <button class="btn toggle" id="layer-labels"><span>Labels</span><em>Key</em></button>
-      <button class="btn toggle on" id="layer-trees"><span>Tree canopy</span><em>On</em></button>
       <button class="btn toggle" id="layer-boundary"><span>Campus boundary</span><em>Off</em></button>
     </div>
     <div class="group">
-      <div class="kicker">Performance &amp; Atmosphere</div>
-      <div class="perf-row">
-        <label class="perf-label" for="quality-select">Quality</label>
-        <select id="quality-select" class="mp-input perf-select">
-          <option value="auto">Auto</option>
-          <option value="low">Low · fastest</option>
-          <option value="medium">Medium</option>
-          <option value="high">High</option>
-        </select>
-      </div>
+      <div class="kicker">Atmosphere</div>
       <button class="btn toggle" id="layer-fps"><span>FPS meter</span><em>Off</em></button>
       <div class="perf-row">
         <label class="perf-label" for="tod-select">Time of day</label>
@@ -165,7 +178,7 @@
     <div class="navmap-chips" id="navmap-chips" role="tablist" aria-label="Routes">
       <button class="nav-chip on" data-route="all" type="button">All routes</button>
       <button class="nav-chip" id="nav-center-player" type="button" title="Center the map on your vehicle">Center on me</button>
-      <button class="nav-chip nav-chip-toggle on" id="nav-traffic" type="button" title="Toggle live traffic layer">Traffic</button>
+      <button class="nav-chip nav-chip-toggle" id="nav-traffic" type="button" title="Toggle live traffic layer">Traffic</button>
       <button class="nav-chip nav-chip-toggle on" id="nav-names" type="button" title="Toggle driver name labels">Names</button>
     </div>
     <button id="navmap-close" class="navmap-close" aria-label="Close map" type="button">×</button>
@@ -239,7 +252,7 @@
     <h3>Controls</h3>
     <p><strong>Drive:</strong> <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> or arrow keys · <kbd>Space</kbd> handbrake · <kbd>C</kbd> camera · <kbd>1</kbd>–<kbd>7</kbd> camera views · <kbd>H</kbd> horn · <kbd>F</kbd> lights · <kbd>G</kbd> high beam · <kbd>B</kbd> hazards · <kbd>R</kbd> reset · <kbd>M</kbd> next mode · <kbd>Esc</kbd> exit vehicle.</p>
     <p><strong>Map:</strong> drag to orbit, right-drag (or shift-drag) to pan, scroll to zoom. Click a building for details. <kbd>L</kbd> labels · <kbd>T</kbd> trees · <kbd>B</kbd> boundary · <kbd>Z</kbd>/<kbd>X</kbd> time of day · <kbd>R</kbd> overview.</p>
-    <p><strong>Multiplayer:</strong> share the room code from the Multiplayer modal — everyone opening it joins the same session and sees each other's vehicles in-world. Every mode is playable in a room; the scoreboard tracks drivers per mode.</p>
+    <p><strong>Multiplayer:</strong> the host chooses <em>Create room</em> first and shares the code; friends enter that code and choose <em>Join room</em>. Everyone in the room sees each other's vehicles. Every mode is playable in a room; the scoreboard tracks drivers per mode.</p>
     <p class="credit-fine">Unofficial visualization, October 2026. OpenStreetMap snapshot 31 October 2026; Esri imagery and AWS terrain tiles retrieved 31 October 2026. Imagery remains the property of its providers.</p>
   </div>
 </div>

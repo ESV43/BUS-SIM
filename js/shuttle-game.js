@@ -609,7 +609,10 @@
   buildFuelStation();
 
   function updateFuel(dt, t) {
-    if (!busState.active) return;
+    if (!busState.active || !vehicleNeedsEnabled) {
+      game.atFuelStation = false;
+      return;
+    }
     const zone = FUEL_ZONES.find(fz => Math.hypot(busState.x - fz.x, busState.z - fz.z) < 7.2);
     game.atFuelStation = !!zone;
     if (zone && Math.abs(busState.speed) < 0.8 && busState.fuel < 99.4) {
@@ -628,7 +631,7 @@
   }
 
   function callRescue() {
-    if (!busState.active || busState.fuel > 0.5) return;
+    if (!vehicleNeedsEnabled || !busState.active || busState.fuel > 0.5) return;
     const fee = Math.min(500, Math.max(0, game.score));
     game.score = Math.max(0, game.score - 500);
     busState.fuel = 42;
@@ -1681,6 +1684,9 @@
     inParking: false, started: false,
     lastHornAt: 0, lastBlinkerAt: 0, blinker: 0
   };
+  const VEHICLE_NEEDS_KEY = 'iiser.drive.vehicleNeeds';
+  let vehicleNeedsEnabled = true;
+  try { vehicleNeedsEnabled = localStorage.getItem(VEHICLE_NEEDS_KEY) !== 'off'; } catch (_) {}
 
   const gateState = { open: 0, target: 0 };
   const VEHICLE_DEFS = {
@@ -1937,7 +1943,7 @@
   }
 
   function resetVehicle() {
-    if (busState.fuel <= 0.5 && busState.active) { callRescue(); return; }
+    if (vehicleNeedsEnabled && busState.fuel <= 0.5 && busState.active) { callRescue(); return; }
     const sp = findNearestRoadPoint(busState.x, busState.z);
     busState.x = sp.x; busState.z = sp.z; busState.heading = sp.heading;
     busState.speed = 0; busState.steer = 0; busState.handbrake = false;
@@ -2180,6 +2186,31 @@
 
   let ui = null;
 
+  function setVehicleNeedsEnabled(enabled) {
+    vehicleNeedsEnabled = !!enabled;
+    try { localStorage.setItem(VEHICLE_NEEDS_KEY, vehicleNeedsEnabled ? 'on' : 'off'); } catch (_) {}
+    if (!vehicleNeedsEnabled) {
+      busState.fuel = 100;
+      busState.health = 100;
+      game.atFuelStation = false;
+      game.outOfFuelNotified = false;
+    }
+    const toggle = document.getElementById('vehicle-needs-toggle');
+    if (toggle) toggle.checked = vehicleNeedsEnabled;
+    flashNotice(vehicleNeedsEnabled
+      ? 'Fuel and vehicle health simulation enabled'
+      : 'Carefree driving enabled · fuel and vehicle damage off', 'good');
+    if (ui) updateHUD(performance.now() / 1000);
+  }
+
+  // The Drive settings are available before the player enters the 3D session,
+  // so bind this control during startup instead of waiting for createDriveUI().
+  const vehicleNeedsToggle = document.getElementById('vehicle-needs-toggle');
+  if (vehicleNeedsToggle) {
+    vehicleNeedsToggle.checked = vehicleNeedsEnabled;
+    vehicleNeedsToggle.addEventListener('change', () => setVehicleNeedsEnabled(vehicleNeedsToggle.checked));
+  }
+
   function makeEl(tag, cls, html) {
     const e = document.createElement(tag);
     if (cls) e.className = cls;
@@ -2289,6 +2320,7 @@
         '<div class="mp-status-box" id="sh-mp-status">Solo session &middot; 8-player rooms available</div>' +
         '<div class="mp-btn-row">' +
           '<button class="btn" type="button" id="sh-mp-open">Multiplayer</button>' +
+          '<button class="btn" type="button" id="sh-trees">Trees on</button>' +
           '<button class="btn" type="button" id="sh-audio">Sound on</button>' +
         '</div>' +
       '</div>';
@@ -2353,6 +2385,7 @@
       modeSelect: hud.querySelector('#sh-mode'),
       exitBtn: hud.querySelector('#sh-exit'),
       mpBtn: hud.querySelector('#sh-mp-open'),
+      treesBtn: hud.querySelector('#sh-trees'),
       audioBtn: hud.querySelector('#sh-audio')
     };
 
@@ -2362,6 +2395,18 @@
     ui.rescueBtn.addEventListener('click', callRescue);
     ui.exitBtn.addEventListener('click', exitDriveMode);
     ui.mpBtn.addEventListener('click', openMpModal);
+    const updateTreesButton = () => {
+      const on = !window.CampusWorld || !window.CampusWorld.getTreesEnabled || window.CampusWorld.getTreesEnabled();
+      ui.treesBtn.textContent = on ? 'Trees on' : 'Trees off';
+      ui.treesBtn.classList.toggle('on', on);
+    };
+    window.addEventListener('iiser:trees', updateTreesButton);
+    ui.treesBtn.addEventListener('click', () => {
+      const cw = window.CampusWorld;
+      if (cw && cw.setTrees && cw.getTreesEnabled) cw.setTrees(!cw.getTreesEnabled());
+      updateTreesButton();
+    });
+    updateTreesButton();
     ui.audioBtn.addEventListener('click', () => {
       busState.audioMuted = !busState.audioMuted;
       ui.audioBtn.textContent = busState.audioMuted ? 'Sound off' : 'Sound on';
@@ -2370,6 +2415,8 @@
     });
     ui.fleetSelect.addEventListener('change', () => switchVehicle(ui.fleetSelect.value));
     ui.modeSelect.addEventListener('change', () => setGameMode(ui.modeSelect.value));
+
+    if (vehicleNeedsToggle) vehicleNeedsToggle.checked = vehicleNeedsEnabled;
 
     const bindHold = (btn, prop) => {
       const on = (e) => { e.preventDefault(); held[prop] = true; };
@@ -2591,7 +2638,7 @@
             game.stopPtr = 0;
             game.laps++;
             game.score += 500;
-            busState.fuel = Math.max(20, busState.fuel - 4);
+            if (vehicleNeedsEnabled) busState.fuel = Math.max(20, busState.fuel - 4);
             flashNotice('Loop complete · ₹500 bonus', 'good');
           }
           game.dwellStopIndex = -1;
@@ -2767,15 +2814,16 @@
     const fwdIntent = held.up;
     const backIntent = held.down;
     const serviceLock = busState.mode === 'route' && game.dwellStopIndex >= 0;
+    const engineAvailable = !vehicleNeedsEnabled || (busState.health > 0 && busState.fuel > 0);
     let engine = 0;
     let braking = false;
 
     if (fwdIntent && !backIntent) {
       if (busState.speed < -0.25) braking = true;
-      else engine = (busState.health > 0 && busState.fuel > 0) ? def.accel : 0;
+      else engine = engineAvailable ? def.accel : 0;
     } else if (backIntent && !fwdIntent) {
       if (busState.speed > 0.25) braking = true;
-      else engine = (busState.health > 0 && busState.fuel > 0) ? -def.accel * 0.78 : 0;
+      else engine = engineAvailable ? -def.accel * 0.78 : 0;
     }
     if (held.hand) braking = true;
     if (serviceLock) {
@@ -2823,19 +2871,21 @@
     const carHit = resolveBusVsAiCars();
     const impactNow = Math.max(res.hit ? res.impactSpeed : 0, carHit.hit ? carHit.impact : 0);
     if (impactNow > 2.2) playImpactThud(impactNow);
-    // Health damage + nominal collision fine for cracking into things
+    // Collision fines remain separate from the optional vehicle health simulation.
     if (impactNow > 2.6) {
       const damage = Math.min(45, Math.round((impactNow - 1.6) * 7));
       if (damage > 0) {
-        busState.health = Math.max(0, busState.health - damage);
+        if (vehicleNeedsEnabled) busState.health = Math.max(0, busState.health - damage);
         if (t - busState.lastHitFineAt > 4.0) {
           busState.lastHitFineAt = t;
           game.score = Math.max(0, game.score - HIT_FINE);
           busState.fines += 1;
           busState.fineAmount += HIT_FINE;
-          flashNotice('Collision −' + damage + ' health · fine ₹' + HIT_FINE, 'bad');
+          flashNotice(vehicleNeedsEnabled
+            ? 'Collision −' + damage + ' health · fine ₹' + HIT_FINE
+            : 'Collision fine ₹' + HIT_FINE + ' · health damage off', 'bad');
         } else {
-          flashNotice('Ouch! −' + damage + ' health', 'bad');
+          flashNotice(vehicleNeedsEnabled ? 'Ouch! −' + damage + ' health' : 'Vehicle health damage is off', 'bad');
         }
       }
     }
@@ -2843,8 +2893,8 @@
     syncRigPose(dt, false);
 
     busState.odo += Math.abs(busState.speed) * dt / 1000;
-    busState.fuel = Math.max(0, busState.fuel - Math.abs(busState.speed) * dt * 0.045);
-    if (busState.fuel <= 0 && !game.outOfFuelNotified) {
+    if (vehicleNeedsEnabled) busState.fuel = Math.max(0, busState.fuel - Math.abs(busState.speed) * dt * 0.045);
+    if (vehicleNeedsEnabled && busState.fuel <= 0 && !game.outOfFuelNotified) {
       game.outOfFuelNotified = true;
       flashNotice('OUT OF FUEL — press R or the RESCUE button (₹500)', 'bad');
     }
@@ -3007,13 +3057,13 @@
     ctx.font = '11px monospace';
     ctx.fillStyle = '#9aa8a3';
     ctx.fillText('GEAR', 122, 58);
-    ctx.fillStyle = '#3be8b0';
-    ctx.fillRect(122, 70, 70 * clamp(busState.fuel / 100, 0, 1), 8);
+    ctx.fillStyle = vehicleNeedsEnabled ? '#3be8b0' : '#66736e';
+    ctx.fillRect(122, 70, vehicleNeedsEnabled ? 70 * clamp(busState.fuel / 100, 0, 1) : 0, 8);
     ctx.strokeStyle = 'rgba(255,255,255,0.25)';
     ctx.strokeRect(122, 70, 70, 8);
     ctx.fillStyle = '#9aa8a3';
     ctx.font = '10px monospace';
-    ctx.fillText('FUEL ' + Math.round(busState.fuel) + '%', 122, 92);
+    ctx.fillText(vehicleNeedsEnabled ? 'FUEL ' + Math.round(busState.fuel) + '%' : 'FUEL OFF', 122, 92);
     bus.dashTex.needsUpdate = true;
   }
 
@@ -3026,10 +3076,10 @@
     ui.gear.textContent = busState.gear;
     ui.gear.classList.toggle('lit-amber', busState.gear === 'R');
     ui.rpm.style.width = clamp((busState.rpm - 700) / 1800, 0, 1) * 100 + '%';
-    ui.fuel.textContent = Math.round(busState.fuel) + '%';
+    ui.fuel.textContent = vehicleNeedsEnabled ? Math.round(busState.fuel) + '%' : 'OFF';
     ui.cash.textContent = '₹' + Math.floor(game.score).toLocaleString('en-IN');
     ui.passengers.textContent = String(game.passengers);
-    ui.rescueBtn.classList.toggle('hidden', !busState.active || busState.fuel > 0.5);
+    ui.rescueBtn.classList.toggle('hidden', !vehicleNeedsEnabled || !busState.active || busState.fuel > 0.5);
     ui.temp.textContent = Math.round(busState.temp) + '°';
     ui.odo.textContent = busState.odo.toFixed(1);
 
@@ -3041,8 +3091,8 @@
     ui.indCam.classList.toggle('lit-orange', !!game.nearSpeedCamera);
     ui.indGate.classList.toggle('lit-green', !busState.gateBlocked);
     ui.indGate.classList.toggle('lit-red', busState.gateBlocked);
-    ui.health.textContent = Math.round(busState.health) + '%';
-    ui.health.classList.toggle('lit-red-text', busState.health <= 30);
+    ui.health.textContent = vehicleNeedsEnabled ? Math.round(busState.health) + '%' : 'OFF';
+    ui.health.classList.toggle('lit-red-text', vehicleNeedsEnabled && busState.health <= 30);
     ui.fines.textContent = '₹' + Math.round(busState.fineAmount);
 
     ui.modeName.textContent = (GAME_MODES.find(m => m.id === busState.mode) || GAME_MODES[0]).kicker;
@@ -3140,7 +3190,7 @@
   // ---------- Multiplayer: BroadcastChannel local co-op + optional WebSocket room ----------
   const mp = {
     enabled: false, room: '', channel: null, ws: null, wsOpen: false,
-    transport: 'pending',
+    transport: 'pending', role: 'join',
     serverId: '', peers: new Map(), lastSend: 0, lastBoard: 0,
     status: 'Solo session · 8-player rooms available'
   };
@@ -3160,13 +3210,21 @@
   }
 
   function mpStatusUpdate() {
-    if (!mp.enabled) {
+    if (mp.enabled && mp.transport === 'error') {
+      // Keep the connection error visible instead of replacing it with a generic count.
+    } else if (!mp.enabled) {
       mp.status = 'Solo session · 8-player rooms available';
     } else {
       const n = mp.peers.size + 1;
-      const transportLabel = mp.wsOpen ? ' · WebSocket' :
-        (mp.transport === 'peer' ? ' · WebRTC peer-to-peer' :
-          (mp.transport === 'pending' ? ' · connecting' : ' · local co-op'));
+      let transportLabel = ' · same-device only';
+      if (mp.wsOpen) transportLabel = ' · server room';
+      else if (mp.transport === 'peer') {
+        transportLabel = mp.role === 'host'
+          ? (n === 1 ? ' · room created · waiting for friend' : ' · hosting')
+          : ' · joined';
+      } else if (mp.transport === 'pending') {
+        transportLabel = mp.role === 'host' ? ' · creating room' : ' · joining room';
+      }
       mp.status = 'Room ' + mp.room + ' · ' + n + ' driver' + (n === 1 ? '' : 's') +
         transportLabel;
     }
@@ -3174,6 +3232,8 @@
       ui.mpStatus.textContent = mp.status;
       ui.mpRoomTag.textContent = mp.enabled ? mp.room : 'SOLO';
     }
+    const modalStatus = document.querySelector('#mp-modal-status');
+    if (modalStatus) modalStatus.textContent = mp.status;
   }
 
   function sendMultiplayerPacket(obj) {
@@ -3283,14 +3343,15 @@
       // The server replaces our client-side id on the wire; adopt it so the roster's
       // self entry matches localPlayer.id and nobody spawns a phantom of their own bus
       if (msg.id) localPlayer.id = msg.id;
-      mp.status = 'Room ' + (msg.room || mp.room) + ' · connected · max ' + (msg.maxPlayers || 8);
-      if (ui) ui.mpStatus.textContent = mp.status;
+      mp.transport = 'ws';
+      mpStatusUpdate();
       updateMpBoard();
     } else if (msg.type === 'leave') {
       removePeer(msg.id);
     } else if (msg.type === 'roomFull') {
+      mp.transport = 'error';
       mp.status = 'Room full (' + (msg.maxPlayers || 8) + '/8) · try another code';
-      if (ui) ui.mpStatus.textContent = mp.status;
+      mpStatusUpdate();
     } else if (msg.type === 'horn') {
       if (msg.id !== localPlayer.id && mp.peers.has(msg.id)) {
         try { honkHorn(false); } catch (_) {}
@@ -3309,6 +3370,7 @@
     mp.room = '';
     mp.serverId = '';
     mp.transport = 'pending';
+    mp.role = 'join';
     for (const id of Array.from(mp.peers.keys())) removePeer(id);
   }
 
@@ -3319,9 +3381,9 @@
     updateMpBoard();
   }
 
-  // ---------- Peer-to-peer (WebRTC) star relay: works on static hosts like Vercel — no server required ----------
-  // First driver to open the room "hosts" it (claims a well-known peer id); everyone else connects to
-  // the host, which relays packets to the rest of the room. Up to 8 drivers per room.
+  // ---------- Explicit host/join PeerJS relay for static deployments ----------
+  // The host claims the room-code ID. Joiners only connect to that ID; they never
+  // silently create a second room when a code is mistyped or the host is absent.
   const star = { peer: null, role: null, hostConn: null, guests: new Map(), settled: false };
 
   function loadPeerJs(cb) {
@@ -3387,14 +3449,21 @@
     };
   }
 
-  function attachPeer(room) {
+  function attachPeer(room, role) {
     if (!mp.enabled || star.peer) return;
     star.settled = false;
     const hostId = 'iiser-drive-' + room;
+    const showError = (message) => {
+      star.settled = true;
+      mp.transport = 'error';
+      mp.status = message;
+      mpStatusUpdate();
+    };
 
     const claimHost = () => {
       let peer;
-      try { peer = new window.Peer(hostId, { debug: 0 }); } catch (_) { return starGuestConnect(); }
+      try { peer = new window.Peer(hostId, { debug: 0 }); }
+      catch (_) { return showError('Room could not be created. Check your connection and try again.'); }
       star.peer = peer;
       star.role = 'host';
       peer.on('open', () => {
@@ -3444,72 +3513,64 @@
         if (type === 'unavailable-id' && star.peer === peer) {
           try { peer.destroy(); } catch (_) {}
           star.peer = null;
-          starGuestConnect();
+          showError('That room code is already active. Join it, or create a new room code.');
         } else if (!star.settled && star.peer === peer) {
-          starFallbackLocal();
+          showError('Room hosting failed. Check your internet connection and try again.');
         }
       });
     };
 
     const starGuestConnect = () => {
       let peer;
-      try { peer = new window.Peer(undefined, { debug: 0 }); } catch (_) { return starFallbackLocal(); }
+      try { peer = new window.Peer(undefined, { debug: 0 }); }
+      catch (_) { return showError('Could not join the room. Check your internet connection and try again.'); }
       star.peer = peer;
       star.role = 'guest';
       peer.on('open', () => {
         if (!mp.enabled) { try { peer.destroy(); } catch (_) {} star.peer = null; return; }
         let conn;
-        try { conn = peer.connect(hostId, { reliable: true, serialization: 'json' }); } catch (_) { return starFallbackLocal(); }
+        try { conn = peer.connect(hostId, { reliable: true, serialization: 'json' }); }
+        catch (_) { return showError('Could not join that room. Check the code and try again.'); }
         star.hostConn = conn;
-        mp.transport = 'peer';
-        mp.status = 'Room ' + mp.room + ' · peer-to-peer, joining host…';
         mpStatusUpdate();
         conn.on('open', () => {
           star.settled = true;
           mp.transport = 'peer';
-          mp.status = 'Room ' + mp.room + ' · peer-to-peer (live)';
           mpStatusUpdate();
           try { conn.send(starGuestHello()); } catch (_) {}
         });
         conn.on('data', (msg) => { try { handleMpPacket(msg); } catch (_) {} });
         conn.on('close', () => {
           if (mp.enabled) {
-            mp.status = 'Room ' + mp.room + ' · host left — room closed';
-            mpStatusUpdate();
+            showError(star.settled
+              ? 'Host connection closed. Ask the host to recreate the room.'
+              : 'Could not connect to that room. Check the code and ask the host to create it first.');
             for (const id of Array.from(mp.peers.keys())) removePeer(id);
           }
         });
         conn.on('error', () => {
-          if (mp.enabled) {
-            mp.status = 'Room ' + mp.room + ' · peer connection lost — local co-op only';
-            mpStatusUpdate();
-          }
+          if (mp.enabled) showError('Direct connection failed. This network may block peer traffic; try another network.');
         });
       });
       peer.on('error', (err) => {
         const type = err && err.type;
         if (type === 'peer-unavailable' && star.peer === peer) {
-          // Nobody is hosting yet — become the host
-          try { peer.destroy(); } catch (_) {}
-          star.peer = null;
-          star.role = null;
-          claimHost();
+          showError('No host found for code ' + mp.room + '. Ask the host to create the room first.');
         } else if (!star.settled && star.peer === peer) {
-          starFallbackLocal();
+          showError('Could not reach the room service. Check your internet connection and try again.');
         }
       });
     };
 
     const starFallbackLocal = () => {
       star.settled = true;
-      mp.transport = 'bc';
-      mp.status = 'Room ' + mp.room + ' · local co-op only (peer-to-peer unreachable — check your internet)';
-      mpStatusUpdate();
+      showError('PeerJS could not load. Room joining is unavailable; check the site connection and refresh.');
     };
 
-    // Guest role: try connecting to the host id; on peer-unavailable we host instead.
-    // Host role: claim the well-known id; on unavailable-id we guest-connect instead.
-    loadPeerJs((ok) => { if (!ok) return starFallbackLocal(); if (!star.peer) claimHost(); });
+    loadPeerJs((ok) => {
+      if (!ok) return starFallbackLocal();
+      if (!star.peer) (role === 'host' ? claimHost : starGuestConnect)();
+    });
   }
 
   function teardownStar() {
@@ -3519,14 +3580,14 @@
     star.peer = null; star.role = null; star.hostConn = null; star.guests.clear(); star.settled = false;
   }
 
-  function connectRoomSocket(room) {
+  function connectRoomSocket(room, role) {
     // Static deployments (including Vercel) use PeerJS/WebRTC directly. The
     // bundled Node server exposes /ws on localhost, or a custom endpoint can be
     // supplied as window.IISER_MULTIPLAYER_WS for a separately hosted server.
     const configuredUrl = window.IISER_MULTIPLAYER_WS || '';
     const isLocalServer = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname) || location.port === '8765';
     if (!configuredUrl && !isLocalServer) {
-      attachPeer(room);
+      attachPeer(room, role);
       return;
     }
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -3536,7 +3597,7 @@
     const startPeer = () => {
       if (peerStarted || !mp.enabled) return;
       peerStarted = true;
-      attachPeer(room);
+      attachPeer(room, role);
     };
     const tryPeer = () => {
       if (settled || !mp.enabled) return;
@@ -3593,7 +3654,7 @@
     }
   }
 
-  function startMultiplayer(room, name, colorIdx, mode) {
+  function startMultiplayer(room, name, colorIdx, mode, role) {
     room = String(room || 'IISER-1').trim().toUpperCase().replace(/[^A-Z0-9_-]/g, '').slice(0, 18) || 'IISER-1';
     name = String(name || 'Driver').trim().slice(0, 18) || 'Driver';
     localPlayer.name = name;
@@ -3603,7 +3664,9 @@
     teardownMp();
     mp.enabled = true;
     mp.room = room;
-    mp.status = 'Joining room ' + room + '…';
+    mp.role = role === 'host' ? 'host' : 'join';
+    mp.transport = 'pending';
+    mp.status = mp.role === 'host' ? 'Creating room ' + room + '…' : 'Joining room ' + room + '…';
     if ('BroadcastChannel' in window) {
       try {
         mp.channel = new BroadcastChannel('iiser-drive-' + room);
@@ -3618,12 +3681,10 @@
     } else {
       equipFleetBus(busState.fleetKey === 'buggy' ? 'transit' : busState.fleetKey);
     }
-    connectRoomSocket(room);
+    connectRoomSocket(room, mp.role);
     sendMultiplayerPacket({ type: 'hello', x: busState.x, y: getSurfaceHeight(busState.x, busState.z), z: busState.z, heading: busState.heading, fleet: busState.fleetKey, mode: busState.mode });
     mpStatusUpdate();
     updateMpBoard();
-    const modal = document.getElementById('mp-modal');
-    if (modal) modal.classList.add('hidden');
     if (ui) {
       ui.mpBoard.classList.remove('hidden');
       ui.modeStrip.classList.remove('hidden');
@@ -3676,6 +3737,14 @@
     ui.mpRows.innerHTML = html;
   }
 
+  function makeRoomCode() {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    const bytes = new Uint8Array(6);
+    if (window.crypto && window.crypto.getRandomValues) window.crypto.getRandomValues(bytes);
+    else for (let i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 256);
+    return Array.from(bytes, b => chars[b % chars.length]).join('');
+  }
+
   function openMpModal() {
     createDriveUI();
     let modal = document.getElementById('mp-modal');
@@ -3687,12 +3756,13 @@
           '<button class="close" type="button" id="mp-close">&times;</button>' +
           '<div class="kicker">8-player campus cruise</div>' +
           '<h2>Multiplayer</h2>' +
-          '<p><strong>Vercel and static hosting:</strong> drivers connect through PeerJS signaling, then share live vehicle positions directly over WebRTC. Share the room code to join the same 8-driver session. For a self-hosted room server, run <code>node multiplayer-server.js</code>; it provides the <code>/ws</code> endpoint. If peer networking is blocked, use the self-hosted server.</p>' +
+          '<p>Create a room and share its code. Your friend enters that code and chooses <strong>Join room</strong>. The host must create the room first.</p>' +
           '<div class="mp-modal-grid">' +
             '<div class="mp-field"><label for="mp-name">Callsign</label>' +
               '<input id="mp-name" class="mp-input" maxlength="18" autocomplete="off"></div>' +
             '<div class="mp-field"><label for="mp-room">Room code</label>' +
-              '<input id="mp-room" class="mp-input" maxlength="18" autocomplete="off" value="IISER-1"></div>' +
+              '<div class="mp-code-row"><input id="mp-room" class="mp-input" maxlength="18" autocomplete="off" spellcheck="false" placeholder="Enter your friend’s code">' +
+              '<button class="btn" type="button" id="mp-copy-code" title="Copy room code">Copy</button></div></div>' +
           '</div>' +
           '<div class="mp-modal-grid">' +
             '<div class="mp-field"><label for="mp-fleet">Vehicle</label>' +
@@ -3713,9 +3783,10 @@
               '</select></div>' +
           '</div>' +
           '<div class="mp-field"><label>Bus colour</label><div class="mp-swatches" id="mp-colors"></div></div>' +
-          '<div class="mp-status-box" id="mp-modal-status">Up to 8 drivers · peer-to-peer on static hosts · your vehicle is ready for this session.</div>' +
+          '<div class="mp-status-box" id="mp-modal-status">Ready. Create a room or enter a code to join.</div>' +
           '<div class="mp-btn-row">' +
-            '<button class="btn primary" type="button" id="mp-connect">Connect</button>' +
+            '<button class="btn primary" type="button" id="mp-host">Create room</button>' +
+            '<button class="btn" type="button" id="mp-join">Join room</button>' +
             '<button class="btn" type="button" id="mp-disconnect">Leave room</button>' +
           '</div>' +
         '</div>';
@@ -3739,26 +3810,55 @@
         const st = modal.querySelector('#mp-modal-status');
         if (st) st.textContent = 'Left the room. You are driving solo.';
       });
-      modal.querySelector('#mp-connect').addEventListener('click', () => {
+      const startFromModal = (role) => {
+        const roomInput = modal.querySelector('#mp-room');
+        const room = String(roomInput.value || '').trim();
+        if (!room) {
+          modal.querySelector('#mp-modal-status').textContent = 'Enter the room code your friend shared.';
+          roomInput.focus();
+          return;
+        }
         const name = modal.querySelector('#mp-name').value || localPlayer.name;
-        const room = modal.querySelector('#mp-room').value || 'IISER-1';
         const fleetSel = modal.querySelector('#mp-fleet');
         const modeSel = modal.querySelector('#mp-mode');
         const fleet = fleetSel ? fleetSel.value : 'transit';
         const mode = modeSel ? modeSel.value : 'route';
         localPlayer.colorIdx = modal.querySelector('.mp-swatch.on') ? +modal.querySelector('.mp-swatch.on').dataset.color : localPlayer.colorIdx;
         switchVehicle(fleet === 'buggy' ? 'buggy' : fleet);
-        startMultiplayer(room, name, localPlayer.colorIdx, mode);
-        const st = modal.querySelector('#mp-modal-status');
-        if (st) st.textContent = 'Connecting to ' + room + '…';
+        startMultiplayer(room, name, localPlayer.colorIdx, mode, role);
+      };
+      modal.querySelector('#mp-host').addEventListener('click', () => {
+        modal.querySelector('#mp-room').value = makeRoomCode();
+        startFromModal('host');
+      });
+      modal.querySelector('#mp-join').addEventListener('click', () => startFromModal('join'));
+      modal.querySelector('#mp-copy-code').addEventListener('click', async () => {
+        const roomInput = modal.querySelector('#mp-room');
+        const status = modal.querySelector('#mp-modal-status');
+        const code = String(roomInput.value || '').trim();
+        if (!code) { status.textContent = 'Create a room first to get a shareable code.'; return; }
+        try {
+          if (!navigator.clipboard || !navigator.clipboard.writeText) throw new Error('clipboard unavailable');
+          await navigator.clipboard.writeText(code);
+          status.textContent = 'Room code ' + code + ' copied. Send it to your friend.';
+        } catch (_) {
+          roomInput.focus(); roomInput.select();
+          let copied = false;
+          try { copied = document.execCommand('copy'); } catch (_) {}
+          status.textContent = copied
+            ? 'Room code ' + code + ' copied. Send it to your friend.'
+            : 'Select and copy room code ' + code + ', then send it to your friend.';
+        }
       });
     }
     const nameInput = modal.querySelector('#mp-name');
     const roomInput = modal.querySelector('#mp-room');
     if (nameInput && !nameInput.value) nameInput.value = localPlayer.name;
-    if (roomInput && !roomInput.value) roomInput.value = localPlayer.room || 'IISER-1';
+    if (roomInput && !roomInput.value) roomInput.value = localPlayer.room || '';
     modal.querySelectorAll('.mp-swatch').forEach(s => s.classList.toggle('on', +s.dataset.color === localPlayer.colorIdx));
     modal.classList.remove('hidden');
+    if (mp.enabled) mpStatusUpdate();
+    else modal.querySelector('#mp-modal-status').textContent = 'Ready. Create a room or enter a code to join.';
   }
 
   function updateMultiplayer(dt, t) {

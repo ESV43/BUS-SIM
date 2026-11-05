@@ -85,6 +85,15 @@ button{font:inherit;color:inherit}
 .mode-card:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .mc-name{font-size:11px;font-weight:700;letter-spacing:.04em;color:#fff}
 .mc-blurb{font-size:8.5px;line-height:1.4;color:var(--muted)}
+.driving-rule-card{margin:0 0 8px;padding:9px 10px;border:1px solid var(--line-soft);border-radius:10px;background:rgba(255,255,255,.035)}
+.driving-rule{display:flex;align-items:center;justify-content:space-between;gap:10px;cursor:pointer}
+.driving-rule-copy{display:flex;flex-direction:column;gap:3px}
+.driving-rule-copy strong{font-size:10px;color:#f4efe3}
+.driving-rule-copy small{font-size:8.5px;line-height:1.4;color:var(--muted)}
+.driving-rule input{width:17px;height:17px;flex:0 0 auto;accent-color:var(--accent);cursor:pointer}
+.drive-settings{margin:8px 0 5px;padding-top:10px;border-top:1px solid var(--line-soft)}
+.drive-settings .kicker{margin-bottom:4px}
+.drive-settings .btn.toggle{margin-top:5px}
 .menu-foot{font-size:9px;color:var(--faint);letter-spacing:.03em;text-align:center;line-height:1.7;
   padding-top:9px;border-top:1px solid var(--line-soft)}
 .menu-foot kbd{margin:0 1px}
@@ -336,6 +345,9 @@ body.shuttle-active #labels{opacity:.32}
 .mp-nametag i{display:inline-block;width:7px;height:7px;border-radius:50%}
 
 .mp-modal-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:10px 0}
+.mp-code-row{display:flex;gap:5px;align-items:stretch}
+.mp-code-row .mp-input{min-width:0;flex:1;text-transform:uppercase;letter-spacing:.08em}
+.mp-code-row .btn{padding:6px 9px;text-align:center}
 .mp-field label{display:block;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.12em;
   color:var(--muted);margin-bottom:4px}
 .mp-input{width:100%;background:rgba(255,255,255,.06);border:1px solid var(--line);border-radius:7px;

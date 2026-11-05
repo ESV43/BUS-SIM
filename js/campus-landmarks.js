@@ -292,8 +292,8 @@
     { type: 'pad', polygon: scaleRing(stdFoot, 368.0, 463.0, 1.15), targetY: 115.2, margin: 10.0 },
     // Level terrace for Oval Walking Park below Cake World
     { type: 'pad', polygon: rectPoly(398.5, 195.0, 74.0, 29.0, -32), targetY: 131.0, margin: 8.0 },
-    // Level terrace for Q-Park garden right in front of Cake World
-    { type: 'pad', polygon: rectPoly(448.0, 169.0, 44.0, 24.0, -32), targetY: 145.2, margin: 7.0 },
+    // Level terrace for Q-Park, offset clear of the service road along its west edge
+    { type: 'pad', polygon: rectPoly(441.2, 173.2, 44.0, 24.0, -32), targetY: 145.2, margin: 7.0 },
     // Level terrace for Bus Terminal Semi-Circular Arcade
     { type: 'pad', polygon: rectPoly(256.0, 452.0, 62.0, 56.0, 0), targetY: 109.2, margin: 9.0 },
     // Level terrace for Students Recreation & Indoor Games Hall
@@ -356,7 +356,7 @@
   const newLabels = [
     {
       text: 'Q-Park',
-      x: 444.0, y: 151.5, z: 168.0,
+      x: 437.2, y: 151.5, z: 172.2,
       kind: 'park', major: true,
       poiInfo: {
         kind: 'Student Park & Stargazing Lawn',
@@ -365,7 +365,7 @@
         floors: '2 Terraces',
         area: '3,150 m²',
         elev: '145 m',
-        cx: 432.0, cz: 176.0, radius: 145,
+        cx: 425.2, cz: 180.2, radius: 145,
         note: 'Popular quiet green park, walking oval & stargazing lawn situated right in front of Cake World.'
       }
     },
@@ -812,10 +812,10 @@
 
     // --- C. Q-PARK (QUANTUM PARK) & OVAL WALKING TRACK (445, 170 & 398, 195) ---
     {
-      // 1. Upper Q-Park Stargazing & Hangout Lawn right in front of Cake World (448, 169)
-      const qy = heightAt(448.0, 169.0);
+      // 1. Upper Q-Park Stargazing & Hangout Lawn, shifted clear of the service-road edge
+      const qy = heightAt(441.2, 173.2);
       const qpark = new T.Group();
-      qpark.position.set(448.0, qy + 0.08, 169.0);
+      qpark.position.set(441.2, qy + 0.08, 173.2);
       qpark.rotation.y = 32 * Math.PI / 180;
 
       // Manicured lush green Q-Park lawn pad with stone curb
@@ -1105,7 +1105,7 @@
     addOBB(378.0, 333.25, 2.0, 24.5, Math.atan2(-12.0, 43.5), 'Check-Dam Wall');
     addCircle(392.0, 357.0, 4.4, 'Observation Pier');
     addCircle(463.0, 356.0, 4.9, 'Lakeside Gazebo');
-    addOBB(448.0, 169.0, 19.8, 9.8, 32 * Math.PI / 180, 'Q-Park Terrace');
+    addOBB(441.2, 173.2, 19.8, 9.8, 32 * Math.PI / 180, 'Q-Park Terrace');
     addOBB(114.2, -79.2, 2.9, 1.5, (-28 + 90) * Math.PI / 180, 'Parked Ambulance');
     addCircle(114.5, -127.5, 1.2, 'Shopping Canopy Pillar');
     {
