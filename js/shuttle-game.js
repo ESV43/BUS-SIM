@@ -8,6 +8,7 @@
   const T = window.THREE;
   const W = window.CampusWorld || window.__dbg;
   if (!T || !W) return;
+  const touchInput = !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
 
   const {
     scene, camera, renderer, D, heightAt, roadInfoAt, getSurfaceHeight,
@@ -2337,15 +2338,18 @@
     document.body.appendChild(tagLayer);
 
     const touch = makeEl('div', 'touch-controls');
+    touch.setAttribute('role', 'group');
+    touch.setAttribute('aria-label', 'Driving touch controls');
     touch.innerHTML =
-      '<div class="touch-group">' +
-        '<button class="touch-btn" type="button" data-touch="left">&#9664;</button>' +
-        '<button class="touch-btn" type="button" data-touch="right">&#9654;</button>' +
+      '<div class="touch-group touch-steer" role="group" aria-label="Steering controls">' +
+        '<button class="touch-btn" type="button" data-touch="left" aria-label="Steer left">&#9664;</button>' +
+        '<button class="touch-btn" type="button" data-touch="right" aria-label="Steer right">&#9654;</button>' +
       '</div>' +
-      '<div class="touch-group">' +
-        '<button class="touch-btn" type="button" data-touch="down">&#9660;</button>' +
-        '<button class="touch-btn touch-go" type="button" data-touch="up">&#9650;</button>' +
-      '</div>';
+      '<div class="touch-group touch-pedals" role="group" aria-label="Brake and accelerator controls">' +
+        '<button class="touch-btn" type="button" data-touch="down" aria-label="Brake or reverse">&#9660;</button>' +
+        '<button class="touch-btn touch-go" type="button" data-touch="up" aria-label="Accelerate">&#9650;</button>' +
+      '</div>' +
+      '<button class="touch-btn touch-exit" id="sh-touch-exit" type="button" aria-label="Exit driving">Exit</button>';
     document.body.appendChild(touch);
 
     ui = {
@@ -2394,6 +2398,8 @@
     ui.resetBtn.addEventListener('click', resetVehicle);
     ui.rescueBtn.addEventListener('click', callRescue);
     ui.exitBtn.addEventListener('click', exitDriveMode);
+    const touchExitBtn = touch.querySelector('#sh-touch-exit');
+    if (touchExitBtn) touchExitBtn.addEventListener('click', exitDriveMode);
     ui.mpBtn.addEventListener('click', openMpModal);
     const updateTreesButton = () => {
       const on = !window.CampusWorld || !window.CampusWorld.getTreesEnabled || window.CampusWorld.getTreesEnabled();
@@ -2419,12 +2425,15 @@
     if (vehicleNeedsToggle) vehicleNeedsToggle.checked = vehicleNeedsEnabled;
 
     const bindHold = (btn, prop) => {
-      const on = (e) => { e.preventDefault(); held[prop] = true; };
+      const on = (e) => {
+        e.preventDefault();
+        try { btn.setPointerCapture(e.pointerId); } catch (_) {}
+        held[prop] = true;
+      };
       const off = (e) => { e.preventDefault(); held[prop] = false; };
       btn.addEventListener('pointerdown', on);
       btn.addEventListener('pointerup', off);
       btn.addEventListener('pointercancel', off);
-      btn.addEventListener('pointerleave', off);
     };
     bindHold(ui.handBtn, 'hand');
     ui.touch.querySelectorAll('[data-touch]').forEach(btn => bindHold(btn, btn.dataset.touch));
@@ -2559,7 +2568,9 @@
     } else {
       game.objectiveText = 'Explore';
       game.detailText = 'No objective — drive the campus at your own pace.';
-      game.statusText = 'W / S throttle · A / D steer · C camera · H horn';
+      game.statusText = touchInput
+        ? 'Use the steering and pedals at the bottom of the screen.'
+        : 'W / S throttle · A / D steer · C camera · H horn';
       if (busState.vehicle === 'buggy') switchVehicle('transit');
     }
 
@@ -2729,7 +2740,9 @@
       ringPulse(-1, t);
     } else {
       game.objectiveText = 'Explore';
-      game.statusText = 'W / S throttle · A / D steer · C camera · H horn';
+      game.statusText = touchInput
+        ? 'Use the steering and pedals at the bottom of the screen.'
+        : 'W / S throttle · A / D steer · C camera · H horn';
       game.stopName = busState.vehicle === 'buggy' ? 'Campus Buggy' : 'IISER Shuttle';
       ringPulse(-1, t);
     }
@@ -3222,6 +3235,10 @@
         transportLabel = mp.role === 'host'
           ? (n === 1 ? ' · room created · waiting for friend' : ' · hosting')
           : ' · joined';
+      } else if (mp.transport === 'looking') {
+        transportLabel = ' · checking for host';
+      } else if (mp.transport === 'connecting') {
+        transportLabel = ' · connecting to host';
       } else if (mp.transport === 'pending') {
         transportLabel = mp.role === 'host' ? ' · creating room' : ' · joining room';
       }
@@ -3526,14 +3543,39 @@
       catch (_) { return showError('Could not join the room. Check your internet connection and try again.'); }
       star.peer = peer;
       star.role = 'guest';
-      peer.on('open', () => {
-        if (!mp.enabled) { try { peer.destroy(); } catch (_) {} star.peer = null; return; }
+
+      let joinAttempts = 0;
+      let retryTimer = 0;
+      let connected = false;
+      const retryRoomLookup = () => {
+        if (!mp.enabled || star.peer !== peer || connected || mp.transport === 'error' || retryTimer) return;
+        if (joinAttempts >= 8) {
+          showError('No active host for code ' + mp.room + '. Keep the host’s game open until it says “room created”, then try Join room again.');
+          return;
+        }
+        mp.transport = 'looking';
+        mp.status = 'Room ' + mp.room + ' · checking for host (' + joinAttempts + '/8)…';
+        mpStatusUpdate();
+        retryTimer = setTimeout(() => {
+          retryTimer = 0;
+          connectToHost();
+        }, 1100);
+      };
+
+      const connectToHost = () => {
+        if (!mp.enabled || star.peer !== peer || connected || mp.transport === 'error') return;
+        joinAttempts++;
+        mp.transport = 'connecting';
         let conn;
         try { conn = peer.connect(hostId, { reliable: true, serialization: 'json' }); }
-        catch (_) { return showError('Could not join that room. Check the code and try again.'); }
+        catch (_) { retryRoomLookup(); return; }
         star.hostConn = conn;
+        mp.status = 'Room ' + mp.room + ' · connecting to host…';
         mpStatusUpdate();
         conn.on('open', () => {
+          connected = true;
+          if (retryTimer) clearTimeout(retryTimer);
+          retryTimer = 0;
           star.settled = true;
           mp.transport = 'peer';
           mpStatusUpdate();
@@ -3541,21 +3583,27 @@
         });
         conn.on('data', (msg) => { try { handleMpPacket(msg); } catch (_) {} });
         conn.on('close', () => {
-          if (mp.enabled) {
-            showError(star.settled
-              ? 'Host connection closed. Ask the host to recreate the room.'
-              : 'Could not connect to that room. Check the code and ask the host to create it first.');
+          if (!connected) retryRoomLookup();
+          else if (mp.enabled) {
+            showError('Host connection closed. Ask the host to recreate the room.');
             for (const id of Array.from(mp.peers.keys())) removePeer(id);
           }
         });
-        conn.on('error', () => {
-          if (mp.enabled) showError('Direct connection failed. This network may block peer traffic; try another network.');
+        conn.on('error', (err) => {
+          if (!connected && err && err.type === 'peer-unavailable') retryRoomLookup();
+          else if (mp.enabled && !connected) showError('Could not connect to PeerJS signaling. Check the connection and try again.');
+          else if (mp.enabled) showError('Direct connection failed. This network may block peer traffic; try another network.');
         });
+      };
+
+      peer.on('open', () => {
+        if (!mp.enabled) { try { peer.destroy(); } catch (_) {} star.peer = null; return; }
+        connectToHost();
       });
       peer.on('error', (err) => {
         const type = err && err.type;
         if (type === 'peer-unavailable' && star.peer === peer) {
-          showError('No host found for code ' + mp.room + '. Ask the host to create the room first.');
+          retryRoomLookup();
         } else if (!star.settled && star.peer === peer) {
           showError('Could not reach the room service. Check your internet connection and try again.');
         }
@@ -3807,6 +3855,7 @@
       modal.querySelector('#mp-close').addEventListener('click', () => modal.classList.add('hidden'));
       modal.querySelector('#mp-disconnect').addEventListener('click', () => {
         leaveMultiplayer();
+        modal.querySelector('#mp-room').readOnly = false;
         const st = modal.querySelector('#mp-modal-status');
         if (st) st.textContent = 'Left the room. You are driving solo.';
       });
@@ -3818,6 +3867,7 @@
           roomInput.focus();
           return;
         }
+        roomInput.readOnly = role === 'host';
         const name = modal.querySelector('#mp-name').value || localPlayer.name;
         const fleetSel = modal.querySelector('#mp-fleet');
         const modeSel = modal.querySelector('#mp-mode');
@@ -3831,12 +3881,23 @@
         modal.querySelector('#mp-room').value = makeRoomCode();
         startFromModal('host');
       });
-      modal.querySelector('#mp-join').addEventListener('click', () => startFromModal('join'));
+      modal.querySelector('#mp-join').addEventListener('click', () => {
+        modal.querySelector('#mp-room').readOnly = false;
+        startFromModal('join');
+      });
       modal.querySelector('#mp-copy-code').addEventListener('click', async () => {
         const roomInput = modal.querySelector('#mp-room');
         const status = modal.querySelector('#mp-modal-status');
         const code = String(roomInput.value || '').trim();
         if (!code) { status.textContent = 'Create a room first to get a shareable code.'; return; }
+        if (!mp.enabled || mp.role !== 'host') {
+          status.textContent = 'Create a room first, then copy its code.';
+          return;
+        }
+        if (!mp.wsOpen && mp.transport !== 'peer') {
+          status.textContent = 'Wait until the room status says it is created before copying the code.';
+          return;
+        }
         try {
           if (!navigator.clipboard || !navigator.clipboard.writeText) throw new Error('clipboard unavailable');
           await navigator.clipboard.writeText(code);
@@ -3855,6 +3916,7 @@
     const roomInput = modal.querySelector('#mp-room');
     if (nameInput && !nameInput.value) nameInput.value = localPlayer.name;
     if (roomInput && !roomInput.value) roomInput.value = localPlayer.room || '';
+    if (roomInput) roomInput.readOnly = mp.enabled && mp.role === 'host';
     modal.querySelectorAll('.mp-swatch').forEach(s => s.classList.toggle('on', +s.dataset.color === localPlayer.colorIdx));
     modal.classList.remove('hidden');
     if (mp.enabled) mpStatusUpdate();

@@ -371,6 +371,7 @@
     cameraExternal: false,
     reduced: window.matchMedia && window.matchMedia('(max-width: 700px)').matches
   };
+  const mobileDevice = state.reduced || !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
 
   const host = document.getElementById('scene-host');
   const initialDpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -396,31 +397,31 @@
   let qualityMode = 'auto';
   try { qualityMode = localStorage.getItem(QUALITY_KEY) || 'auto'; } catch (_) {}
   if (!/^(auto|low|medium|high)$/.test(qualityMode)) qualityMode = 'auto';
-  const perf = { scale: 0.72, ema: 1 / 60, lastAdjust: 0 };
+  const perf = { scale: mobileDevice ? 0.60 : 0.72, ema: 1 / 60, lastAdjust: 0 };
   function shadowResolutionFor(mode) {
     if (mode === 'high') return 1536;
-    if (mode === 'medium' && !isSoftwareGL && !state.reduced && window.innerWidth >= 900) return 1024;
+    if (mode === 'medium' && !isSoftwareGL && !mobileDevice && window.innerWidth >= 900) return 1024;
     return 512;
   }
   function basePixelRatio() {
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    if (qualityMode === 'low') return 0.82;
-    if (qualityMode === 'medium') return Math.min(dpr, 1.5);
+    if (qualityMode === 'low') return mobileDevice ? 0.72 : 0.82;
+    if (qualityMode === 'medium') return Math.min(dpr, mobileDevice ? 1.25 : 1.5);
     if (qualityMode === 'high') return dpr;
-    return Math.min(dpr, 1.25);
+    return Math.min(dpr, mobileDevice ? 1.25 : 1.5);
   }
   function effectivePixelRatio() {
     const base = isSoftwareGL ? 1 : basePixelRatio();
-    return Math.max(0.62, base * (qualityMode === 'auto' ? perf.scale : 1));
+    return Math.max(mobileDevice ? 0.55 : 0.62, base * (qualityMode === 'auto' ? perf.scale : 1));
   }
   function setQuality(mode) {
     if (!/^(auto|low|medium|high)$/.test(mode)) mode = 'auto';
     qualityMode = mode;
     try { localStorage.setItem(QUALITY_KEY, mode); } catch (_) {}
-    perf.scale = mode === 'auto' ? 0.72 : 1;
+    perf.scale = mode === 'auto' ? (mobileDevice ? 0.60 : 0.72) : 1;
     renderer.setPixelRatio(effectivePixelRatio());
     if (unrealFXRef) unrealFXRef.resize();
-    renderer.shadowMap.enabled = mode !== 'low';
+    renderer.shadowMap.enabled = mode !== 'low' && !(mobileDevice && mode === 'auto');
     const shadowResolution = shadowResolutionFor(mode);
     if (sunLight.shadow.mapSize.width !== shadowResolution) {
       sunLight.shadow.mapSize.set(shadowResolution, shadowResolution);
@@ -433,19 +434,19 @@
     window.dispatchEvent(new CustomEvent('iiser:quality', { detail: mode }));
   }
   renderer.setPixelRatio(effectivePixelRatio());
-  const qualityTier = (isSoftwareGL || state.reduced || window.innerWidth < 900) ? 'low' : 'mid';
+  const qualityTier = (isSoftwareGL || mobileDevice || window.innerWidth < 900) ? 'low' : 'mid';
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.outputEncoding = T.sRGBEncoding;
   renderer.toneMapping = T.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.02;
-  renderer.shadowMap.enabled = qualityMode !== 'low';
+  renderer.shadowMap.enabled = qualityMode !== 'low' && !(mobileDevice && qualityMode === 'auto');
   renderer.shadowMap.type = T.PCFShadowMap; // cheaper than PCFSoft, visually comparable at campus scale
   host.appendChild(renderer.domElement);
 
   const scene = new T.Scene();
   scene.fog = new T.FogExp2(0xc9e0ec, 0.00018);
   const camera = new T.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.65, 15000);
-  const maxAniso = Math.min(16, renderer.capabilities.getMaxAnisotropy());
+  const maxAniso = Math.min(mobileDevice ? 3 : 16, renderer.capabilities.getMaxAnisotropy());
 
   const hemi = new T.HemisphereLight(0xa8d0f8, 0x4a5a3c, 0.72);
   scene.add(hemi);
@@ -3294,7 +3295,11 @@
   const navStops = document.getElementById('navmap-stops');
   const navDrive = document.getElementById('navmap-drive');
   const minimapCard = document.getElementById('minimap-card');
-  const navView = { cx: 0, cz: 0, scale: 0.3, dragging: false, dragMoved: false, lastX: 0, lastY: 0, selRoute: 'active', flashStop: -1, flashAt: 0, showTraffic: false, showNames: true };
+  const navView = {
+    cx: 0, cz: 0, scale: 0.3, dragging: false, dragMoved: false, lastX: 0, lastY: 0,
+    pointers: new Map(), pinchDistance: 0, pinchMidX: 0, pinchMidY: 0,
+    selRoute: 'active', flashStop: -1, flashAt: 0, showTraffic: false, showNames: true
+  };
   const navTrafficBtn = document.getElementById('nav-traffic');
   const navNamesBtn = document.getElementById('nav-names');
   const navCenterBtn = document.getElementById('nav-center-player');
@@ -3308,7 +3313,7 @@
 
   function navResize() {
     if (!navCanvas) return;
-    const dpr = Math.min(1.5, window.devicePixelRatio || 1);
+    const dpr = mobileDevice ? 1 : Math.min(1.5, window.devicePixelRatio || 1);
     navCanvas.width = Math.floor(window.innerWidth * dpr);
     navCanvas.height = Math.floor(window.innerHeight * dpr);
     navView.dpr = dpr;
@@ -3660,20 +3665,56 @@
     navmap.addEventListener('pointerdown', (e) => {
       if (e.target !== navCanvas) return;
       navView.dragging = true;
-      navView.dragMoved = false;
+      navView.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      navView.dragMoved = navView.pointers.size > 1;
       navView.lastX = e.clientX; navView.lastY = e.clientY;
       navCanvas.setPointerCapture(e.pointerId);
+      if (navView.pointers.size >= 2) {
+        const pts = [...navView.pointers.values()];
+        navView.pinchDistance = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+        navView.pinchMidX = (pts[0].x + pts[1].x) / 2;
+        navView.pinchMidY = (pts[0].y + pts[1].y) / 2;
+      }
     });
     navmap.addEventListener('pointermove', (e) => {
-      if (!navView.dragging) return;
+      if (!navView.dragging || !navView.pointers.has(e.pointerId)) return;
       const dpr = navView.dpr || 1;
+      navView.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (navView.pointers.size >= 2) {
+        const pts = [...navView.pointers.values()];
+        const distance = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+        const midX = (pts[0].x + pts[1].x) / 2;
+        const midY = (pts[0].y + pts[1].y) / 2;
+        navView.dragMoved = true;
+        if (navView.pinchDistance > 0 && distance > 0) {
+          const before = navScreenToWorld(midX * dpr, midY * dpr);
+          navView.scale = clamp(navView.scale * (distance / navView.pinchDistance), 0.12, 6.5);
+          const after = navScreenToWorld(midX * dpr, midY * dpr);
+          navView.cx += before.x - after.x;
+          navView.cz += before.z - after.z;
+        }
+        navView.cx -= (midX - navView.pinchMidX) * dpr / navView.scale;
+        navView.cz -= (midY - navView.pinchMidY) * dpr / navView.scale;
+        navView.pinchDistance = distance;
+        navView.pinchMidX = midX;
+        navView.pinchMidY = midY;
+        return;
+      }
       if (Math.abs(e.clientX - navView.lastX) + Math.abs(e.clientY - navView.lastY) > 2) navView.dragMoved = true;
       navView.cx -= (e.clientX - navView.lastX) * dpr / navView.scale;
       navView.cz -= (e.clientY - navView.lastY) * dpr / navView.scale;
       navView.lastX = e.clientX; navView.lastY = e.clientY;
     });
     const endDrag = (e) => {
-      navView.dragging = false;
+      navView.pointers.delete(e.pointerId);
+      if (navView.pointers.size === 1) {
+        const p = [...navView.pointers.values()][0];
+        navView.dragging = true;
+        navView.lastX = p.x; navView.lastY = p.y;
+      } else {
+        navView.dragging = false;
+        navView.pinchDistance = 0;
+      }
       try { navCanvas.releasePointerCapture(e.pointerId); } catch (_) {}
     };
     navmap.addEventListener('pointerup', endDrag);
@@ -4045,16 +4086,18 @@
         if (m.isMesh && m.material && m.material.userData && m.material.userData.occluder) arcadeOccluders.push(m);
       });
     }
-    if (arcadeOccluders.length) {
+    if (arcadeOccluders.length && !mobileDevice) {
       const d = camera.position.distanceTo(arcadeFadeCenter);
       const fade = T.MathUtils.clamp(1 - d / 180, 0, 1);
       const target = d < 180 ? 0.12 + 0.15 * fade : 1.0;
       for (let i = 0; i < arcadeOccluders.length; i++) arcadeOccluders[i].material.opacity = target;
     }
     if (!navOpen) {
-      updateLabels();
-      updateReadout();
-      updateSelection(elapsed);
+      if (!(mobileDevice && state.cameraExternal)) updateLabels();
+      if (!state.cameraExternal) {
+        updateReadout();
+        updateSelection(elapsed);
+      }
     }
 
     if (waterMats.length) {
@@ -4063,8 +4106,8 @@
     }
 
     if (!navOpen) {
-      updateMinimap();
-      updateScale();
+      if (!mobileDevice) updateMinimap();
+      if (!state.cameraExternal) updateScale();
     }
 
     if (navOpen) {
