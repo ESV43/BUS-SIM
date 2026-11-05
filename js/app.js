@@ -2701,7 +2701,21 @@
       mesh.frustumCulled = true;
       mesh.instanceMatrix.needsUpdate = true;
       if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
-      if (mesh.computeBoundingSphere) mesh.computeBoundingSphere();
+      // Three.js r149 does not provide InstancedMesh.computeBoundingSphere().
+      // Give the renderer a bound around every transformed instance; otherwise
+      // frustum culling falls back to the untransformed source geometry at (0,0,0).
+      if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
+      const instanceBounds = new T.Box3();
+      const vegetationBounds = new T.Box3();
+      const instanceMatrix = new T.Matrix4();
+      for (let i = 0; i < mesh.count; i++) {
+        mesh.getMatrixAt(i, instanceMatrix);
+        instanceBounds.copy(mesh.geometry.boundingBox).applyMatrix4(instanceMatrix);
+        vegetationBounds.union(instanceBounds);
+      }
+      vegetationBounds.expandByScalar(1.0); // allow for the wind sway shader
+      mesh.boundingSphere = new T.Sphere();
+      vegetationBounds.getBoundingSphere(mesh.boundingSphere);
       treeGroup.add(mesh);
     }
     forEachVegetationCell(broadleafList, items => {
