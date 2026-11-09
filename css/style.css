@@ -202,6 +202,19 @@ body.labels-off .label{display:none}
   border-radius:4px;padding:1px 5px}
 .credit-fine{margin-top:18px;font-size:9.5px !important;color:var(--faint) !important}
 .modal-card .close{top:12px;right:12px}
+.howto-card{width:min(760px,100%)}
+.howto-lead{font-size:12.5px !important;color:#e4ddce !important;margin:0 0 16px}
+.howto-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:4px}
+.howto-step{position:relative;padding:12px 13px 10px 42px;border:1px solid var(--line-soft);border-radius:11px;
+  background:rgba(255,255,255,.035)}
+.howto-step h3{margin:0 0 5px;font-size:9.5px;letter-spacing:.15em}
+.howto-step p{font-size:11px !important;line-height:1.55 !important;margin:0}
+.howto-num{position:absolute;left:12px;top:12px;width:21px;height:21px;border-radius:50%;display:flex;
+  align-items:center;justify-content:center;font-size:10px;font-weight:800;color:#1a130b;background:var(--accent)}
+.howto-actions{display:flex;gap:8px;margin-top:18px;flex-wrap:wrap}
+.howto-actions .btn{flex:1;text-align:center;padding:11px 12px}
+.howto-open{margin-bottom:14px;text-align:center;font-weight:600;letter-spacing:.03em}
+@media (max-width:640px){.howto-grid{grid-template-columns:1fr}}
 
 /* ---------- error ---------- */
 #error{position:fixed;inset:0;z-index:120;display:flex;align-items:center;justify-content:center;padding:30px;
@@ -473,6 +486,10 @@ body.shuttle-active .title-card{opacity:0;pointer-events:none;transition:opacity
   box-shadow:0 22px 54px rgba(0,0,0,.5);backdrop-filter:blur(12px)}
 .navmap-route-name{font-size:15.5px;font-weight:800;color:#fff;letter-spacing:.01em;line-height:1.25}
 .navmap-route-count{font-size:10px;text-transform:uppercase;letter-spacing:.14em;color:var(--accent)}
+.navmap-next{margin-top:-2px;padding:7px 9px;border-radius:8px;font-size:10.5px;line-height:1.4;color:#e8e4d6;
+  background:rgba(227,162,91,.12);border:1px solid rgba(227,162,91,.32)}
+.navmap-next b{color:var(--accent);font-weight:700}
+.navmap-next em{font-style:normal;color:#b9c8bd}
 .navmap-stops{flex:1;overflow-y:auto;list-style:none;margin:0;padding:0 2px 0 0;display:flex;flex-direction:column;gap:5px}
 .navmap-stop{display:grid;grid-template-columns:22px 1fr auto;align-items:center;gap:8px;width:100%;text-align:left;
   padding:6px 8px;border-radius:9px;border:1px solid transparent;background:rgba(255,255,255,.035);cursor:pointer;transition:all .12s ease}
@@ -491,6 +508,7 @@ body.shuttle-active .title-card{opacity:0;pointer-events:none;transition:opacity
 .lg-gate{background:transparent;height:0;width:0;border-left:5px solid transparent;border-right:5px solid transparent;border-bottom:9px solid #ffc66e}
 .lg-bus{background:#ffc66e;width:12px;height:12px;border-radius:2px 6px 6px 2px;box-shadow:0 0 6px rgba(255,198,110,.6)}
 .lg-fuel{background:#45d8e8;width:10px;height:10px;border-radius:50%;box-shadow:0 0 6px rgba(69,216,232,.55)}
+.lg-stop{background:#f4efe3;width:9px;height:9px;border-radius:50%;border:2px solid #101713;box-shadow:0 0 5px rgba(244,239,227,.45)}
 .navmap-hint{position:absolute;left:50%;bottom:12px;transform:translateX(-50%);padding:7px 16px;border-radius:999px;
   background:rgba(10,16,13,.82);border:1px solid rgba(255,255,255,.13);font-size:10.5px;color:#cfd8cc;white-space:nowrap;
   backdrop-filter:blur(6px)}

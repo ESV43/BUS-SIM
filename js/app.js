@@ -3292,6 +3292,7 @@
   const navChips = document.getElementById('navmap-chips');
   const navRouteName = document.getElementById('navmap-route-name');
   const navRouteCount = document.getElementById('navmap-route-count');
+  const navNext = document.getElementById('navmap-next');
   const navStops = document.getElementById('navmap-stops');
   const navDrive = document.getElementById('navmap-drive');
   const minimapCard = document.getElementById('minimap-card');
@@ -3347,6 +3348,15 @@
   function navCenterOn(x, z, scale) {
     navView.cx = x; navView.cz = z;
     if (scale) navView.scale = scale;
+  }
+
+  function navEtaText(dist, speed) {
+    const v = Math.max(Math.abs(speed || 0), 6);
+    const sec = Math.max(1, Math.round((dist || 0) / v * 1.15));
+    if (sec < 60) return sec + 's';
+    const min = Math.round(sec / 60);
+    if (min < 60) return min + ' min';
+    return Math.floor(min / 60) + 'h ' + (min % 60) + 'm';
   }
 
   function navBuildChips() {
@@ -3510,6 +3520,53 @@
       }
     }
 
+    // Live next pickup: ring, bearing line and ETA badge
+    const sgNext = window.ShuttleGame;
+    const nextStop = sgNext && sgNext.getNextStop ? sgNext.getNextStop() : null;
+    const liveBus = nextStop && sgNext.getState ? sgNext.getState() : null;
+    if (nextStop && nextStop.active && nextStop.x != null) {
+      const np = navWorldToScreen(nextStop.x, nextStop.z);
+      if (np.x > -40 && np.y > -40 && np.x < W + 40 && np.y < H + 40) {
+        navCtx.save();
+        if (liveBus) {
+          const bp = navWorldToScreen(liveBus.x, liveBus.z);
+          navCtx.setLineDash([6, 5]);
+          navCtx.strokeStyle = 'rgba(255,198,110,0.7)';
+          navCtx.lineWidth = 1.6;
+          navCtx.beginPath();
+          navCtx.moveTo(bp.x, bp.y);
+          navCtx.lineTo(np.x, np.y);
+          navCtx.stroke();
+          navCtx.setLineDash([]);
+        }
+        const pulse = 9 + Math.sin(performance.now() * 0.0045) * 2.5;
+        navCtx.strokeStyle = '#ffc66e';
+        navCtx.lineWidth = 2.4;
+        navCtx.beginPath();
+        navCtx.arc(np.x, np.y, pulse, 0, Math.PI * 2);
+        navCtx.stroke();
+        const label = (nextStop.isPickup ? 'NEXT · ' : 'TARGET · ') + String(nextStop.name).replace(/^Pickup · /, '') +
+          (nextStop.dist < 4 ? ' · here' : ' · ~' + navEtaText(nextStop.dist, liveBus ? liveBus.speed : 0));
+        navCtx.font = '800 10px system-ui, sans-serif';
+        const tw = navCtx.measureText(label).width;
+        const boxW = tw + 10;
+        let lx = np.x + 12;
+        if (lx + boxW > W - 6) lx = np.x - boxW - 12;
+        lx = Math.max(6, Math.min(W - boxW - 6, lx));
+        let ly = Math.max(6, Math.min(H - 22, np.y - 20));
+        navCtx.fillStyle = 'rgba(20,16,8,0.88)';
+        navCtx.fillRect(lx, ly, boxW, 16);
+        navCtx.strokeStyle = 'rgba(255,198,110,0.55)';
+        navCtx.lineWidth = 1;
+        navCtx.strokeRect(lx, ly, boxW, 16);
+        navCtx.fillStyle = '#ffd79a';
+        navCtx.textAlign = 'left';
+        navCtx.textBaseline = 'middle';
+        navCtx.fillText(label, lx + 5, ly + 8.5);
+        navCtx.restore();
+      }
+    }
+
     // Live traffic + other multiplayer drivers
     const sgLive = window.ShuttleGame;
     if (navView.showTraffic && sgLive && sgLive.getTraffic) {
@@ -3617,15 +3674,31 @@
   }
 
   function navRefreshDistances() {
-    if (!navStops || !window.ShuttleGame || !window.ShuttleGame.getState) return;
+    if (!window.ShuttleGame || !window.ShuttleGame.getState) return;
     const busState = window.ShuttleGame.getState();
+    const next = window.ShuttleGame.getNextStop ? window.ShuttleGame.getNextStop() : null;
+    if (navNext) {
+      if (next && next.active && next.name) {
+        const label = String(next.name).replace(/^Pickup · /, '');
+        const extra = next.dist > 3
+          ? Math.round(next.dist) + ' m · ~' + navEtaText(next.dist, busState.speed)
+          : 'arrived';
+        const prefix = next.isPickup ? 'Next pickup: ' : 'Next target: ';
+        navNext.innerHTML = prefix + '<b>' + escapeHtml(label) + '</b> <em>' + extra + '</em>';
+      } else {
+        navNext.innerHTML = 'Next pickup: <em>start driving to see the live ETA</em>';
+      }
+    }
+    if (!navStops) return;
     const info = routesInfo();
     if (!info || navView.selRoute === 'all') return;
     const r = info.routes[+navView.selRoute];
     if (!r) return;
     navStops.querySelectorAll('[data-dist]').forEach(el => {
       const st = r.stops[+el.dataset.dist];
-      if (st) el.textContent = Math.round(Math.hypot(busState.x - st.x, busState.z - st.z)) + ' m';
+      if (!st) return;
+      const d = Math.hypot(busState.x - st.x, busState.z - st.z);
+      el.textContent = d < 4 ? 'here' : Math.round(d) + ' m · ~' + navEtaText(d, busState.speed);
     });
   }
 
@@ -3645,6 +3718,7 @@
     const routeInfo = routesInfo();
     if (navView.selRoute === 'active' && routeInfo) navView.selRoute = String(routeInfo.activeIdx);
     navSelectRoute(navView.selRoute || 'all');
+    navRefreshDistances();
     cancelAnimationFrame(navRaf);
     navRaf = requestAnimationFrame(drawNavmap);
   }
@@ -3785,6 +3859,52 @@
   document.getElementById('credits-open').addEventListener('click', openModal);
   document.getElementById('modal-close').addEventListener('click', closeModal);
   modal.addEventListener('click', e => { if (e.target === modal) closeModal(); });
+
+  // ---------- How to play ----------
+  const howto = document.getElementById('howto');
+  const HOWTO_SEEN_KEY = 'iiser.drive.howtoSeen';
+  function openHowTo() {
+    if (howto) howto.classList.remove('hidden');
+  }
+  function closeHowTo() {
+    if (!howto) return;
+    howto.classList.add('hidden');
+    try { localStorage.setItem(HOWTO_SEEN_KEY, '1'); } catch (_) {}
+  }
+  function maybeShowHowTo() {
+    if (!howto) return;
+    let seen = false;
+    try { seen = localStorage.getItem(HOWTO_SEEN_KEY) === '1'; } catch (_) {}
+    if (!seen) openHowTo();
+  }
+  if (howto) {
+    const closeBtn = document.getElementById('howto-close');
+    const gotitBtn = document.getElementById('howto-gotit');
+    const startBtn = document.getElementById('howto-start');
+    if (closeBtn) closeBtn.addEventListener('click', closeHowTo);
+    if (gotitBtn) gotitBtn.addEventListener('click', closeHowTo);
+    if (startBtn) startBtn.addEventListener('click', () => {
+      closeHowTo();
+      const driveStart = document.getElementById('drive-start');
+      if (driveStart) driveStart.click();
+    });
+    howto.addEventListener('click', e => { if (e.target === howto) closeHowTo(); });
+    const loadingEl = document.getElementById('loading');
+    if (loadingEl) {
+      if (loadingEl.classList.contains('done')) maybeShowHowTo();
+      else {
+        const observer = new MutationObserver(() => {
+          if (!loadingEl.classList.contains('done')) return;
+          observer.disconnect();
+          maybeShowHowTo();
+        });
+        observer.observe(loadingEl, { attributes: true, attributeFilter: ['class'] });
+      }
+    }
+  }
+  const howtoOpen = document.getElementById('howto-open');
+  if (howtoOpen) howtoOpen.addEventListener('click', openHowTo);
+  window.CampusDriveHowToOpen = openHowTo;
 
   const projTmp = new T.Vector3();
   function updateLabels() {

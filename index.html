@@ -37,6 +37,7 @@
       <span class="ds-main">Start driving</span>
       <span class="ds-sub">Drop into the driver's seat</span>
     </button>
+    <button class="btn wide howto-open" id="howto-open" type="button">How to play &amp; controls</button>
     <div class="kicker menu-label">Vehicle</div>
     <div class="veh-cards" id="vehicle-cards" role="radiogroup" aria-label="Vehicle">
       <button class="veh-card on" data-vehicle="transit" role="radio" aria-checked="true" type="button">
@@ -186,6 +187,7 @@
   <aside class="navmap-panel" id="navmap-panel">
     <div class="navmap-route-name" id="navmap-route-name">All shuttle routes</div>
     <div class="navmap-route-count" id="navmap-route-count">4 routes · 16 stops</div>
+    <div class="navmap-next" id="navmap-next">Next pickup: —</div>
     <ol class="navmap-stops" id="navmap-stops"></ol>
     <button class="btn primary wide" id="navmap-drive" type="button">Drive this route</button>
     <div class="navmap-legend">
@@ -193,6 +195,7 @@
       <span><i class="lg lg-hwy"></i>SH-45 Highway</span>
       <span><i class="lg lg-water"></i>Waterbody</span>
       <span><i class="lg lg-gate"></i>Main Gate</span>
+      <span><i class="lg lg-stop"></i>Pickup point</span>
       <span><i class="lg lg-bus"></i>You (live)</span>
       <span><i class="lg lg-fuel"></i>Fuel station</span>
     </div>
@@ -254,6 +257,53 @@
     <p><strong>Map:</strong> drag to orbit, right-drag (or shift-drag) to pan, scroll to zoom. Click a building for details. <kbd>L</kbd> labels · <kbd>T</kbd> trees · <kbd>B</kbd> boundary · <kbd>Z</kbd>/<kbd>X</kbd> time of day · <kbd>R</kbd> overview.</p>
     <p><strong>Multiplayer:</strong> the host chooses <em>Create room</em> first and shares the code; friends enter that code and choose <em>Join room</em>. Everyone in the room sees each other's vehicles. Every mode is playable in a room; the scoreboard tracks drivers per mode.</p>
     <p class="credit-fine">Unofficial visualization, October 2026. OpenStreetMap snapshot 31 October 2026; Esri imagery and AWS terrain tiles retrieved 31 October 2026. Imagery remains the property of its providers.</p>
+  </div>
+</div>
+
+<div id="howto" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="howto-title">
+  <div class="modal-card panel howto-card">
+    <button class="close" id="howto-close" aria-label="Close">×</button>
+    <div class="kicker"><span class="mark"></span> New driver briefing</div>
+    <h2 id="howto-title">How to play</h2>
+    <p class="howto-lead">You are driving a real-scale IISER Vithura campus shuttle. Pick a vehicle and a mode, then follow the gold route line and green pickup rings.</p>
+    <div class="howto-grid">
+      <section class="howto-step">
+        <span class="howto-num">1</span>
+        <h3>Drive</h3>
+        <p><kbd>W</kbd>/<kbd>S</kbd> or arrow keys to accelerate and brake, <kbd>A</kbd>/<kbd>D</kbd> to steer, <kbd>Space</kbd> for the handbrake. Press <kbd>C</kbd> to cycle cameras and <kbd>1</kbd>–<kbd>7</kbd> for a specific view.</p>
+      </section>
+      <section class="howto-step">
+        <span class="howto-num">2</span>
+        <h3>Pick up students</h3>
+        <p>Drive to a stop marked by a glowing green ring, stop inside it and open the doors by waiting. Students walk aboard automatically; the HUD shows the next pickup name, distance and ETA.</p>
+      </section>
+      <section class="howto-step">
+        <span class="howto-num">3</span>
+        <h3>Shuttle 101</h3>
+        <p>Complete all 8 stops on the active route for a ₹500 loop bonus. Every boarded student earns ₹20. Follow the route colour and the next-stop arrow.</p>
+      </section>
+      <section class="howto-step">
+        <span class="howto-num">4</span>
+        <h3>Other modes</h3>
+        <p>Time Trial races the 8 stops, Precision Park tests your bay parking, and Buggy Safari runs the hilltop trail. Free Drive and Multiplayer still allow student pickups at any stop.</p>
+      </section>
+      <section class="howto-step">
+        <span class="howto-num">5</span>
+        <h3>Map</h3>
+        <p>Every pickup point is marked on the minimap. Press <kbd>N</kbd> (or double-click the minimap) for the full navigation map with routes, pickup times and live traffic.</p>
+      </section>
+      <section class="howto-step">
+        <span class="howto-num">6</span>
+        <h3>Multiplayer</h3>
+        <p>The host chooses <strong>Create room</strong> and shares the code. Friends enter that code and choose <strong>Join room</strong>. Keep the host's game open; up to 8 drivers can cruise together.</p>
+      </section>
+    </div>
+    <h3>Quick controls</h3>
+    <p><kbd>H</kbd> horn · <kbd>F</kbd> lights · <kbd>G</kbd> high beam · <kbd>B</kbd> hazards · <kbd>R</kbd> reset · <kbd>M</kbd> next mode · <kbd>N</kbd> map · <kbd>Esc</kbd> exit vehicle.</p>
+    <div class="howto-actions">
+      <button class="btn primary" id="howto-start" type="button">Start driving</button>
+      <button class="btn" id="howto-gotit" type="button">Got it</button>
+    </div>
   </div>
 </div>
 

@@ -2181,9 +2181,35 @@
     trialDone: false, trialBest: 0, parkTarget: null, parkDone: false,
     parkProps: [], parkObstacles: [], targetRing: -1, nearSpeedCamera: false,
     objectiveText: '', detailText: '', statusText: '', stopName: '', stopDist: 0,
+    stopEta: 0, nextStopIndex: -1,
     dwellStopIndex: -1, dwellTime: 0, dwellAlighted: 0
   };
   try { game.trialBest = parseFloat(localStorage.getItem('iiser.drive.trialBest') || '0') || 0; } catch (_) {}
+
+  function nearestBusStop(x, z) {
+    let best = null, bestIdx = -1, bestD = Infinity;
+    for (let i = 0; i < BUS_STOPS.length; i++) {
+      const st = BUS_STOPS[i];
+      const d = Math.hypot(x - st.x, z - st.z);
+      if (d < bestD) { bestD = d; best = st; bestIdx = i; }
+    }
+    return best ? { idx: bestIdx, stop: best, d: bestD } : null;
+  }
+
+  // Distance-to-time estimate for the next pickup. Uses the current speed when
+  // moving, otherwise a realistic campus cruising speed (~22 km/h).
+  function estimateStopEta(dist) {
+    const v = Math.max(Math.abs(busState.speed), 6.0);
+    return Math.max(1, Math.round(dist / v * 1.15));
+  }
+
+  function formatEta(seconds) {
+    const sec = Math.max(1, Math.round(seconds || 0));
+    if (sec < 60) return sec + ' s';
+    const min = Math.floor(sec / 60);
+    if (min < 60) return min + ' min';
+    return Math.floor(min / 60) + ' h ' + (min % 60) + ' min';
+  }
 
   let ui = null;
 
@@ -2321,6 +2347,7 @@
         '<div class="mp-status-box" id="sh-mp-status">Solo session &middot; 8-player rooms available</div>' +
         '<div class="mp-btn-row">' +
           '<button class="btn" type="button" id="sh-mp-open">Multiplayer</button>' +
+          '<button class="btn" type="button" id="sh-help">How to play</button>' +
           '<button class="btn" type="button" id="sh-trees">Trees on</button>' +
           '<button class="btn" type="button" id="sh-audio">Sound on</button>' +
         '</div>' +
@@ -2389,6 +2416,7 @@
       modeSelect: hud.querySelector('#sh-mode'),
       exitBtn: hud.querySelector('#sh-exit'),
       mpBtn: hud.querySelector('#sh-mp-open'),
+      helpBtn: hud.querySelector('#sh-help'),
       treesBtn: hud.querySelector('#sh-trees'),
       audioBtn: hud.querySelector('#sh-audio')
     };
@@ -2401,6 +2429,9 @@
     const touchExitBtn = touch.querySelector('#sh-touch-exit');
     if (touchExitBtn) touchExitBtn.addEventListener('click', exitDriveMode);
     ui.mpBtn.addEventListener('click', openMpModal);
+    if (ui.helpBtn) ui.helpBtn.addEventListener('click', () => {
+      if (window.CampusDriveHowToOpen) window.CampusDriveHowToOpen();
+    });
     const updateTreesButton = () => {
       const on = !window.CampusWorld || !window.CampusWorld.getTreesEnabled || window.CampusWorld.getTreesEnabled();
       ui.treesBtn.textContent = on ? 'Trees on' : 'Trees off';
@@ -2614,6 +2645,8 @@
   function updateObjective(dt, t) {
     game.stopName = '';
     game.stopDist = 0;
+    game.stopEta = 0;
+    game.nextStopIndex = -1;
     if (!busState.active) {
       ringPulse(-1, t);
       return;
@@ -2626,6 +2659,8 @@
       const d = Math.hypot(busState.x - st.x, busState.z - st.z);
       game.stopName = st.name;
       game.stopDist = d;
+      game.stopEta = estimateStopEta(d);
+      game.nextStopIndex = stopIdx;
       ringPulse(stopIdx, t);
       game.objectiveText = rt.name;
       game.statusText = 'Students ' + game.passengers + ' · Cash ₹' + Math.floor(game.score);
@@ -2676,6 +2711,8 @@
         const d = Math.hypot(busState.x - st.x, busState.z - st.z);
         game.stopName = st.name;
         game.stopDist = d;
+        game.stopEta = estimateStopEta(d);
+        game.nextStopIndex = stopIdx;
         ringPulse(stopIdx, t);
         game.objectiveText = 'Checkpoint ' + (game.cpIndex + 1) + ' / ' + game.checkpoints.length;
         game.statusText = 'Time ' + game.trialTime.toFixed(1) + 's · Best ' +
@@ -2699,6 +2736,7 @@
         const d = Math.hypot(busState.x - p.x, busState.z - p.z);
         game.stopName = game.parkDone ? 'Parked!' : 'Green parking bay';
         game.stopDist = d;
+        game.stopEta = estimateStopEta(d);
         game.objectiveText = 'Precision parking';
         if (!game.parkDone) {
           game.statusText = 'Distance to bay ' + Math.round(d) + ' m · approach slowly';
@@ -2719,6 +2757,8 @@
       const d = Math.hypot(busState.x - st.x, busState.z - st.z);
       game.stopName = st.name;
       game.stopDist = d;
+      game.stopEta = estimateStopEta(d);
+      game.nextStopIndex = game.checkpoints[game.cpIndex % game.checkpoints.length];
       ringPulse(game.checkpoints[game.cpIndex % game.checkpoints.length], t);
       game.objectiveText = 'Checkpoint ' + (game.cpIndex + 1) + ' / ' + game.checkpoints.length;
       game.statusText = 'Buggy trail · stay off the kerbs';
@@ -2732,19 +2772,27 @@
         }
       }
     } else if (busState.mode === 'multi') {
+      const near = nearestBusStop(busState.x, busState.z);
       game.objectiveText = '8-player cruise';
       game.statusText = mp.enabled
         ? ('Room ' + mp.room + ' · ' + (mp.peers.size + 1) + ' drivers connected')
         : 'Open Multiplayer to join a room.';
-      game.stopName = mp.enabled ? ('Room ' + mp.room) : 'Solo cruise';
-      ringPulse(-1, t);
+      game.stopName = near ? 'Pickup · ' + near.stop.name : 'Solo cruise';
+      game.stopDist = near ? near.d : 0;
+      game.stopEta = near ? estimateStopEta(near.d) : 0;
+      game.nextStopIndex = near ? near.idx : -1;
+      ringPulse(near ? near.idx : -1, t);
     } else {
+      const near = nearestBusStop(busState.x, busState.z);
       game.objectiveText = 'Explore';
       game.statusText = touchInput
         ? 'Use the steering and pedals at the bottom of the screen.'
         : 'W / S throttle · A / D steer · C camera · H horn';
-      game.stopName = busState.vehicle === 'buggy' ? 'Campus Buggy' : 'IISER Shuttle';
-      ringPulse(-1, t);
+      game.stopName = near ? 'Pickup · ' + near.stop.name : (busState.vehicle === 'buggy' ? 'Campus Buggy' : 'IISER Shuttle');
+      game.stopDist = near ? near.d : 0;
+      game.stopEta = near ? estimateStopEta(near.d) : 0;
+      game.nextStopIndex = near ? near.idx : -1;
+      ringPulse(near ? near.idx : -1, t);
     }
   }
 
@@ -2794,7 +2842,7 @@
         w.steerPivot.rotation.y += ((w.front ? busState.steer : 0) - w.steerPivot.rotation.y) * Math.min(1, dt * 10);
       }
     }
-    const doorTarget = busState.mode === 'route' && game.dwellStopIndex >= 0 ? 1 : 0;
+    const doorTarget = busState.vehicle === 'bus' && game.dwellStopIndex >= 0 ? 1 : 0;
     busState.doorOpen += (doorTarget - busState.doorOpen) * Math.min(1, dt * 3.5);
     if (busState.doorOpen < 0.015) busState.doorOpen = 0;
     if (busState.doorOpen > 0.985) busState.doorOpen = 1;
@@ -3111,7 +3159,11 @@
     ui.modeName.textContent = (GAME_MODES.find(m => m.id === busState.mode) || GAME_MODES[0]).kicker;
     ui.objective.textContent = game.objectiveText || 'Explore';
     ui.stopName.textContent = game.stopName || 'IISER Vithura Campus';
-    ui.dist.textContent = game.stopDist > 0 ? Math.round(game.stopDist) + ' m' : '';
+    ui.dist.textContent = game.stopName && game.stopDist < 4
+      ? (game.nextStopIndex >= 0 ? 'at pickup · ' : 'at target · ') + game.stopName.replace(/^Pickup · /, '')
+      : (game.stopDist > 0
+        ? Math.round(game.stopDist) + ' m' + (game.stopEta > 0 ? ' · ~' + formatEta(game.stopEta) : '')
+        : '');
     ui.status.textContent = game.atFuelStation
       ? (Math.abs(busState.speed) < 0.8
         ? 'Fuel station · refuelling at ₹2/L · Cash ₹' + Math.floor(game.score)
@@ -3259,7 +3311,7 @@
       id: localPlayer.id, name: localPlayer.name,
       colorIdx: localPlayer.colorIdx, ts: Date.now()
     }, obj || {});
-    if (mp.channel && mp.transport === 'bc') {
+    if (mp.channel) {
       try { mp.channel.postMessage(packet); } catch (_) {}
     }
     if (mp.ws && mp.ws.readyState === 1) {
@@ -3401,7 +3453,10 @@
   // ---------- Explicit host/join PeerJS relay for static deployments ----------
   // The host claims the room-code ID. Joiners only connect to that ID; they never
   // silently create a second room when a code is mistyped or the host is absent.
-  const star = { peer: null, role: null, hostConn: null, guests: new Map(), settled: false, joinTimer: 0 };
+  const star = {
+    peer: null, role: null, hostConn: null, guests: new Map(), guestState: new Map(),
+    settled: false, joinTimer: 0
+  };
 
   function loadPeerJs(cb) {
     if (window.Peer) { cb(true); return; }
@@ -3430,7 +3485,7 @@
       colorIdx: localPlayer.colorIdx, mode: busState.mode, score: game.score,
       x: busState.x, y: getSurfaceHeight(busState.x, busState.z), z: busState.z, heading: busState.heading
     }];
-    for (const g of star.guests.values()) players.push(g);
+    for (const g of star.guestState.values()) players.push(g);
     return players;
   }
 
@@ -3441,7 +3496,7 @@
   }
 
   function starUpdateGuest(pid, msg) {
-    const prev = star.guests.get(pid) || {
+    const prev = star.guestState.get(pid) || {
       id: pid, name: 'Driver', fleet: 'transit', colorIdx: 0,
       mode: 'free', score: 0, x: 197.5, y: 105, z: 534.0, heading: 0.48
     };
@@ -3455,7 +3510,7 @@
       prev.x = +msg.x || 0; prev.y = +msg.y || 0; prev.z = +msg.z || 0;
       prev.heading = +msg.heading || 0;
     }
-    star.guests.set(pid, prev);
+    star.guestState.set(pid, prev);
   }
 
   function starGuestHello() {
@@ -3519,13 +3574,26 @@
         });
         conn.on('close', () => {
           star.guests.delete(conn.peer);
+          star.guestState.delete(conn.peer);
           if (mp.enabled) starBroadcastRoster();
         });
         conn.on('error', () => {
           star.guests.delete(conn.peer);
+          star.guestState.delete(conn.peer);
           if (mp.enabled) starBroadcastRoster();
         });
-        conn.on('open', () => { star.guests.set(conn.peer, { id: conn.peer, name: 'Driver', fleet: 'transit', colorIdx: 0, mode: 'free', score: 0, x: 197.5, y: 105, z: 534.0, heading: 0.48 }); });
+        conn.on('open', () => {
+          star.guests.set(conn.peer, conn);
+          star.guestState.set(conn.peer, {
+            id: conn.peer, name: 'Driver', fleet: 'transit', colorIdx: 0,
+            mode: 'free', score: 0, x: 197.5, y: 105, z: 534.0, heading: 0.48
+          });
+          if (!mp.enabled) return;
+          // Push the host's current roster and pose immediately so the new guest
+          // sees the host bus without waiting for the next periodic state tick.
+          starBroadcastRoster();
+          sendMpState();
+        });
       });
       peer.on('error', (err) => {
         const type = err && err.type;
@@ -3639,7 +3707,7 @@
     try { for (const [, conn] of star.guests) { try { conn.close(); } catch (_) {} } } catch (_) {}
     if (star.hostConn) { try { star.hostConn.close(); } catch (_) {} }
     if (star.peer) { try { star.peer.destroy(); } catch (_) {} }
-    star.peer = null; star.role = null; star.hostConn = null; star.guests.clear(); star.settled = false;
+    star.peer = null; star.role = null; star.hostConn = null; star.guests.clear(); star.guestState.clear(); star.settled = false;
   }
 
   function connectRoomSocket(room, role) {
@@ -3733,7 +3801,7 @@
       try {
         mp.channel = new BroadcastChannel('iiser-drive-' + room);
         mp.transport = 'pending';
-        mp.channel.onmessage = (ev) => { if (mp.transport !== 'bc') return; handleMpPacket(ev.data); };
+        mp.channel.onmessage = (ev) => { handleMpPacket(ev.data); };
       } catch (_) { mp.channel = null; mp.transport = 'ws'; }
     } else {
       mp.transport = 'ws';
@@ -4010,6 +4078,33 @@
     return n;
   }
 
+  // Free Drive, Time Trial, Parking and Multiplayer still honour the campus
+  // pickup points: stop the bus inside a stop bay and students walk aboard.
+  function updateStopService(dt, t) {
+    if (!busState.active || busState.vehicle !== 'bus' || busState.mode === 'route') return;
+    const near = nearestBusStop(busState.x, busState.z);
+    const stopped = Math.abs(busState.speed) < 0.8;
+    const within = !!near && near.d < 11;
+    if (stopped && within) {
+      if (game.dwellStopIndex !== near.idx) {
+        game.dwellStopIndex = near.idx;
+        game.dwellTime = 0;
+        const st = near.stop;
+        game.dwellAlighted = spawnAlightingPassengers(1 + Math.floor(Math.random() * 2),
+          st.shelterX != null ? st.shelterX : st.x,
+          st.shelterZ != null ? st.shelterZ : st.z);
+        if (game.dwellAlighted > 0) {
+          flashNotice(game.dwellAlighted + ' passenger' + (game.dwellAlighted > 1 ? 's' : '') + ' getting off', 'good');
+        }
+      }
+      game.dwellTime += dt;
+    } else if (game.dwellStopIndex >= 0) {
+      game.dwellStopIndex = -1;
+      game.dwellTime = 0;
+      game.dwellAlighted = 0;
+    }
+  }
+
   function updateWaitingStudents(dt, t) {
     for (let i = 0; i < waitingStudents.length; i++) {
       const s = waitingStudents[i];
@@ -4018,7 +4113,7 @@
         m.position.y = s.home.y + Math.abs(Math.sin(t * 1.7 + s.phase)) * 0.018;
         m.rotation.y = s.homeRot + Math.sin(t * 0.55 + s.phase) * 0.22;
         const st = BUS_STOPS[s.stopIndex];
-        if (busState.active && busState.mode === 'route' && game.dwellStopIndex === s.stopIndex && Math.abs(busState.speed) < 0.8) {
+        if (busState.active && busState.vehicle === 'bus' && game.dwellStopIndex === s.stopIndex && Math.abs(busState.speed) < 0.8) {
           const d = Math.hypot(busState.x - st.x, busState.z - st.z);
           if (d < 11) {
             const shx = s.shelterX != null ? s.shelterX : st.x;
@@ -4099,6 +4194,7 @@
   function gameLoop(dt, t) {
     updateAiTraffic(dt, t);
     updateGate(dt);
+    updateStopService(dt, t);
     updateWaitingStudents(dt, t);
     if (busState.active) {
       updatePlayer(dt, t);
@@ -4116,10 +4212,12 @@
 
   if (W.onMinimapDraw) {
     W.onMinimapDraw((ctx, mx, my) => {
-      // Highlight the active shuttle route + next stop on the 2D minimap
+      // Pickup points are always visible on the minimap; the live route and the
+      // next pickup are emphasised on top of them.
       const info = getRoutesInfo();
       const active = info.routes[info.activeIdx];
-      if (active && (busState.mode === 'route' || busState.mode === 'trial')) {
+      const routeMode = busState.mode === 'route' || busState.mode === 'trial';
+      if (active && routeMode) {
         ctx.save();
         ctx.strokeStyle = active.color;
         ctx.globalAlpha = 0.82;
@@ -4132,31 +4230,51 @@
         });
         ctx.closePath();
         ctx.stroke();
-        ctx.globalAlpha = 1;
+        ctx.restore();
+      }
+
+      for (let i = 0; i < BUS_STOPS.length; i++) {
+        const st = BUS_STOPS[i];
+        const sx = mx(st.x), sy = my(st.z);
+        ctx.fillStyle = '#f4efe3';
+        ctx.strokeStyle = '#101713';
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.arc(sx, sy, 2.7, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+      }
+
+      if (active && routeMode) {
+        ctx.save();
+        ctx.globalAlpha = 0.95;
         for (const st of active.stops) {
           ctx.fillStyle = active.color;
           ctx.beginPath();
-          ctx.arc(mx(st.x), my(st.z), 2.6, 0, Math.PI * 2);
+          ctx.arc(mx(st.x), my(st.z), 2.4, 0, Math.PI * 2);
           ctx.fill();
         }
-        // Next stop pulse + bearing line
-        const next = BUS_STOPS[active.stops[game.stopPtr % active.stops.length].index];
-        if (next) {
-          const nx = mx(next.x), ny = my(next.z);
-          ctx.setLineDash([4, 4]);
-          ctx.strokeStyle = 'rgba(255,255,255,0.65)';
-          ctx.lineWidth = 1.1;
-          ctx.beginPath();
-          ctx.moveTo(mx(busState.x), my(busState.z));
-          ctx.lineTo(nx, ny);
-          ctx.stroke();
-          ctx.setLineDash([]);
-          ctx.strokeStyle = active.color;
-          ctx.lineWidth = 1.6;
-          ctx.beginPath();
-          ctx.arc(nx, ny, 5.2, 0, Math.PI * 2);
-          ctx.stroke();
-        }
+        ctx.restore();
+      }
+
+      // Next pickup: pulsing ring plus a bearing line from the bus.
+      const next = game.nextStopIndex >= 0 ? BUS_STOPS[game.nextStopIndex] : null;
+      if (next && busState.initialized) {
+        const nx = mx(next.x), ny = my(next.z);
+        ctx.save();
+        ctx.setLineDash([4, 4]);
+        ctx.strokeStyle = 'rgba(255,255,255,0.65)';
+        ctx.lineWidth = 1.1;
+        ctx.beginPath();
+        ctx.moveTo(mx(busState.x), my(busState.z));
+        ctx.lineTo(nx, ny);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.strokeStyle = routeMode && active ? active.color : '#ffc66e';
+        ctx.lineWidth = 1.8;
+        ctx.beginPath();
+        ctx.arc(nx, ny, 5.4 + Math.sin(performance.now() * 0.0042) * 1.2, 0, Math.PI * 2);
+        ctx.stroke();
         ctx.restore();
       }
       for (let i = 0; i < aiCars.length; i++) {
@@ -4259,6 +4377,20 @@
       return Array.from(mp.peers.values()).map(p => ({
         x: p.x, z: p.z, heading: p.heading, colorIdx: p.colorIdx, name: p.name, fleet: p.fleet
       }));
+    },
+    getNextStop: function () {
+      const st = game.nextStopIndex >= 0 ? BUS_STOPS[game.nextStopIndex] : null;
+      return {
+        active: !!busState.active,
+        mode: busState.mode,
+        index: game.nextStopIndex,
+        name: game.stopName || (st ? st.name : ''),
+        x: st ? st.x : null,
+        z: st ? st.z : null,
+        dist: game.stopDist,
+        eta: game.stopEta,
+        isPickup: game.nextStopIndex >= 0 && busState.mode !== 'park'
+      };
     },
     rebuildObstacleGrid: function () {
       staticGrid.clear();
