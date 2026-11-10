@@ -1,7 +1,7 @@
 /* IISER Thiruvananthapuram — 3D GLB Campus & SH-45 Highway Bus Simulator
  * Real .GLB Transit/Coach/College Fleet, 7-Mode Multi-Camera System,
  * Impermeable Spatial-Hashed Multi-Disc Solid Collisions, Exterior SH-45 Highway,
- * 6 Playable Game Modes & Up-to-8-Player Multiplayer (BroadcastChannel + WebSocket + AI Fill). */
+ * 3 Game Modes (Free Ride, Mission, 8-Player Co-op) with BroadcastChannel + WebSocket. */
 (function () {
   'use strict';
 
@@ -397,8 +397,8 @@
   // --- 4. 16 BUS STOPS (12 CAMPUS + 4 EXTERIOR SH-45 HIGHWAY) & 4 SHUTTLE ROUTES ---
   const FLEET_MASS = { transit: 7800, coach: 11500, college: 6200 };
   const AI_CAR_MASS = 1050;
-  const SPEED_LIMIT_CAMPUS = 30 / 3.6; // 30 km/h campus limit
-  const SPEED_LIMIT_HWY = 60 / 3.6;    // 60 km/h SH-45 limit
+  // Cameras only issue a fine above 50 km/h, campus or highway.
+  const SPEED_CAMERA_LIMIT = 50 / 3.6;
   const FINE_AMOUNT = 150;
   const HIT_FINE = 50;
   const BUS_STOPS = [
@@ -412,30 +412,63 @@
     { id: 'academic',     name: 'Academic Block, LHC & Science',   x: 342.9,  z: -54.4,  heading: -2.34 },
     { id: 'vfr',          name: 'Visitors Forest Retreat',         x: 201.0,  z:  42.0,  heading:  3.10 },
     { id: 'health',       name: 'Health Centre & Shopping Plaza',  x: 116.4,  z: -86.1,  heading: -2.05 },
-    { id: 'kathipara',    name: 'Kathipara Football Ground',       x: -82.9,  z: -359.0, heading: -1.62 },
+    { id: 'kathipara',    name: 'Kathipara Football Ground',       x: -104.0, z: -358.4, heading: -1.62 },
     { id: 'quarters',     name: 'Faculty & Staff Quarters',        x: -466.1, z: -398.8, heading:  2.78 },
     // Exterior SH-45 Vithura–Ponmudi Highway Stops (Outside Main Gate!)
     { id: 'sh45_gate',    name: 'SH-45 Main Gate Highway Jn',      x: 145.0,  z: 556.0,  heading: -1.96 },
     { id: 'vithura_fuel', name: 'Vithura Fuel & KSRTC Stand',      x: -125.0, z: 604.5,  heading: -1.45 },
     { id: 'golden_valley',name: 'Golden Valley Ghat Viewpoint',    x: 416.0,  z: 777.0,  heading:  1.15 },
-    { id: 'vithura_west', name: 'Vithura Town West Highway',       x: -485.0, z: 668.0,  heading: -1.72 }
+    { id: 'vithura_west', name: 'Vithura Town West Highway',       x: -485.0, z: 668.0,  heading: -1.72 },
+    // Infill stops added along the internal road network (snapped to the road in buildBusStopShelters)
+    { id: 'instr',        name: 'Central Instrumentation & Biology', x:  671.0, z:   76.5, heading:  1.20 },
+    { id: 'director',     name: "Director's Building & Admin Circle",x: -269.4, z: -439.1, heading:  0.40 },
+    { id: 'plaza',        name: 'Shopping Lane & CDH-III',           x:   83.3, z: -258.6, heading: -1.40 },
+    { id: 'sispara',      name: 'Sispara & PhD Hostel Block 6',      x:  335.1, z:  282.9, heading:  1.00 },
+    { id: 'ankita',       name: 'Ankita Dhaba & North Gate Link',    x:  306.6, z:  656.6, heading: -1.90 }
   ];
 
+  // ---------- Distance-based fare model ----------
+  // ₹10 flag fall plus ₹15 per kilometre of the passenger's own trip.
+  const FARE_BASE = 10;
+  const FARE_PER_KM = 15;
+  const BUS_CAPACITY = 46; // seats + standing on the transit bus
+  function stopDistance(fromIdx, toIdx) {
+    const a = BUS_STOPS[fromIdx], b = BUS_STOPS[toIdx];
+    return Math.hypot(b.x - a.x, b.z - a.z);
+  }
+  function fareForStops(fromIdx, toIdx) {
+    const km = stopDistance(fromIdx, toIdx) / 1000;
+    return Math.max(FARE_BASE, Math.round(FARE_BASE + FARE_PER_KM * km));
+  }
+  // Every waiting passenger has somewhere to go; the fare follows from that pair of stops.
+  function pickDestination(fromIdx) {
+    const n = BUS_STOPS.length;
+    if (n < 2) return fromIdx;
+    let to = fromIdx;
+    for (let tries = 0; tries < 8 && to === fromIdx; tries++) to = Math.floor(Math.random() * n);
+    return to === fromIdx ? (fromIdx + 1) % n : to;
+  }
+
   const ROUTES = [
-    { id: '101', name: 'Route 101 · Main Campus Express',        stops: [0, 1, 2, 3, 4, 5, 6, 7] },
-    { id: '202', name: 'Route 202 · Medical, VFR & Shops',       stops: [0, 6, 8, 9, 7, 5, 4] },
-    { id: '303', name: 'Route 303 · Western Hilltop Climb',      stops: [7, 9, 10, 11, 10, 8, 6] },
-    { id: '404', name: 'Route 404 · SH-45 Vithura–Ponmudi Hwy',  stops: [0, 12, 13, 15, 13, 12, 14, 12, 1, 2] }
+    { id: '101', name: 'Route 101 · Main Campus Express',        stops: [0, 1, 2, 3, 4, 19, 5, 16, 6, 7],
+      estMinutes: 24, schedule: '06:30 – 21:30 · every 20 min' },
+    { id: '202', name: 'Route 202 · Medical, VFR & Shops',       stops: [0, 6, 8, 9, 18, 7, 5, 4, 19],
+      estMinutes: 20, schedule: '07:00 – 21:00 · every 25 min' },
+    { id: '303', name: 'Route 303 · Western Hilltop Climb',      stops: [7, 9, 18, 10, 17, 11, 17, 10, 8, 6],
+      estMinutes: 28, schedule: '06:45 – 20:45 · every 30 min' },
+    { id: '404', name: 'Route 404 · SH-45 Vithura–Ponmudi Hwy',  stops: [0, 20, 12, 13, 15, 13, 12, 14, 12, 1, 2],
+      estMinutes: 34, schedule: '06:00 – 22:00 · every 40 min' }
   ];
   const ROUTE_COLORS = ['#ffc24b', '#3be8b0', '#c084fc', '#4ac6e8'];
+  const ROUTE_TIMES = [24, 20, 28, 34]; // estimated full-route minutes
 
   // --- 4B. SPEED CAMERAS ON CAMPUS SPINE & SH-45 (auto-fine when over the limit) ---
   const SPEED_CAMERAS = [
-    { road: 18, at: 0.22, limit: SPEED_LIMIT_HWY },
-    { road: 18, at: 0.58, limit: SPEED_LIMIT_HWY },
-    { road: 0,  at: 0.33, limit: SPEED_LIMIT_CAMPUS },
-    { road: 0,  at: 0.74, limit: SPEED_LIMIT_CAMPUS },
-    { road: 16, at: 0.46, limit: SPEED_LIMIT_CAMPUS }
+    { road: 18, at: 0.22, limit: SPEED_CAMERA_LIMIT },
+    { road: 18, at: 0.58, limit: SPEED_CAMERA_LIMIT },
+    { road: 0,  at: 0.33, limit: SPEED_CAMERA_LIMIT },
+    { road: 0,  at: 0.74, limit: SPEED_CAMERA_LIMIT },
+    { road: 16, at: 0.46, limit: SPEED_CAMERA_LIMIT }
   ];
 
   function samplePolylineAt(pts, fraction) {
@@ -534,7 +567,7 @@
         game.score = Math.max(0, game.score - FINE_AMOUNT);
         busState.fines += 1;
         busState.fineAmount += FINE_AMOUNT;
-        flashNotice('Speed camera − fine ₹' + FINE_AMOUNT + ' (' + Math.round(Math.abs(busState.speed) * 3.6) + ' km/h)', 'bad');
+        flashNotice('Speed camera − fine ₹' + FINE_AMOUNT + ' over 50 km/h (' + Math.round(Math.abs(busState.speed) * 3.6) + ' km/h)', 'bad');
       }
     }
     game.nearSpeedCamera = anyNear;
@@ -773,19 +806,24 @@
       // Register solid OBB for the shelter structure
       solidObstacles.push({ kind: 'obb', cx: sx, cz: sz, hx: 2.65, hz: 1.15, yaw: shelterYaw });
 
-      for (let p = 0; p < 2; p++) {
+      const WAITING_PER_STOP = 3;
+      const HOME_SPOTS = [[-1.55, 0.44], [0.05, 0.06], [1.6, 0.44]];
+      for (let p = 0; p < WAITING_PER_STOP; p++) {
         const rig = createStudentRig(si, p);
         const stu = rig.stu;
-        const home = new T.Vector3(-0.95 + p * 1.9, 0.24, 0.30);
+        const spot = HOME_SPOTS[p % HOME_SPOTS.length];
+        const home = new T.Vector3(spot[0], 0.24, spot[1]);
         stu.position.copy(home);
         const scale = 0.94 + ((si + p) % 3) * 0.035;
         stu.scale.setScalar(scale);
         shelter.add(stu);
+        const destIdx = pickDestination(si);
         waitingStudents.push({
           mesh: stu, stopIndex: si, phase: si * 1.7 + p,
           homeLocal: home.clone(), homeRot: Math.sin(si * 1.3 + p) * 0.45,
           shelterYaw, shelterX: sx, shelterZ: sz,
           legL: rig.legL, legR: rig.legR, armL: rig.armL, armR: rig.armR,
+          destIndex: destIdx, fare: fareForStops(si, destIdx),
           state: 'waiting', walkT: 0, respawnAt: 0
         });
       }
@@ -810,6 +848,42 @@
     }
   }
   buildBusStopShelters();
+
+  // --- 4A. NEXT-STOP WAYFINDING ARROW ---
+  // A floating gold chevron above the bus that points at the next stop.
+  const navArrow = new T.Group();
+  {
+    const arrowMat = new T.MeshBasicMaterial({
+      color: 0xffd166, transparent: true, opacity: 0.92, depthWrite: false, side: T.DoubleSide
+    });
+    const head = new T.Mesh(new T.ConeGeometry(0.62, 1.25, 4), arrowMat);
+    head.rotation.x = Math.PI / 2; // cone tip now points along local +Z
+    head.position.z = 0.85;
+    const shaft = new T.Mesh(new T.BoxGeometry(0.5, 0.12, 1.5), arrowMat);
+    shaft.position.z = -0.35;
+    navArrow.add(head, shaft);
+    navArrow.visible = false;
+    scene.add(navArrow);
+  }
+
+  function updateNavArrow(t) {
+    const st = game.nextStopIndex >= 0 ? BUS_STOPS[game.nextStopIndex] : null;
+    if (!navArrow) return;
+    if (!busState.active || !st || busState.mode === 'park') {
+      navArrow.visible = false;
+      return;
+    }
+    const dx = st.x - busState.x, dz = st.z - busState.z;
+    const d = Math.hypot(dx, dz);
+    if (d < 5.5) { navArrow.visible = false; return; }
+    navArrow.visible = true;
+    navArrow.position.set(
+      busState.x,
+      getSurfaceHeight(busState.x, busState.z) + 4.25 + Math.sin(t * 2.6) * 0.14,
+      busState.z
+    );
+    navArrow.rotation.y = Math.atan2(dx, dz);
+  }
 
   // --- 4B. SPATIAL-HASHED IMPERMEABLE SOLID-BODY COLLISION ENGINE ---
   const HASH_CELL = 16.0;
@@ -2167,12 +2241,9 @@
 
   // ---------- Game mode definitions & objective state ----------
   const GAME_MODES = [
-    { id: 'free',   label: 'Free Drive',     kicker: 'FREE DRIVE' },
-    { id: 'route',  label: 'Shuttle 101',    kicker: 'ROUTE 101' },
-    { id: 'trial',  label: 'Time Trial',     kicker: 'TIME TRIAL' },
-    { id: 'park',   label: 'Precision Park', kicker: 'PARKING TEST' },
-    { id: 'safari', label: 'Buggy Safari',   kicker: 'BUGGY SAFARI' },
-    { id: 'multi',  label: 'Multiplayer',    kicker: 'MULTIPLAYER' }
+    { id: 'free',   label: 'Free Ride',   kicker: 'FREE RIDE' },
+    { id: 'route',  label: 'Mission',     kicker: 'MISSION' },
+    { id: 'multi',  label: 'Multiplayer', kicker: 'MULTIPLAYER · 8P' }
   ];
 
   const game = {
@@ -2182,7 +2253,8 @@
     parkProps: [], parkObstacles: [], targetRing: -1, nearSpeedCamera: false,
     objectiveText: '', detailText: '', statusText: '', stopName: '', stopDist: 0,
     stopEta: 0, nextStopIndex: -1,
-    dwellStopIndex: -1, dwellTime: 0, dwellAlighted: 0
+    dwellStopIndex: -1, dwellTime: 0, dwellAlighted: 0,
+    onboard: [] // destination stop index of every passenger currently aboard
   };
   try { game.trialBest = parseFloat(localStorage.getItem('iiser.drive.trialBest') || '0') || 0; } catch (_) {}
 
@@ -2308,11 +2380,17 @@
         '<div class="sh-bars">' +
           '<div><span>Fuel</span><strong id="sh-fuel">100%</strong></div>' +
           '<div><span>Cash</span><strong id="sh-cash">&#8377;0</strong></div>' +
-          '<div><span>Students</span><strong id="sh-passengers">0</strong></div>' +
           '<div><span>Health</span><strong id="sh-health">100%</strong></div>' +
           '<div><span>Fines</span><strong id="sh-fines">&#8377;0</strong></div>' +
           '<div><span>Temp</span><strong id="sh-temp">72&deg;</strong></div>' +
           '<div><span>Odo</span><strong id="sh-odo">0.0</strong></div>' +
+        '</div>' +
+        '<div class="passenger-card compact">' +
+          '<div class="passenger-icon">&#128134;</div>' +
+          '<div class="passenger-main">' +
+            '<span class="passenger-count-num" id="sh-passengers">0</span>' +
+            '<span class="passenger-label" data-i18n="passengersPlural">passengers on board</span>' +
+          '</div>' +
         '</div>' +
       '</div>' +
       '<div class="sh-center panel">' +
@@ -2320,6 +2398,7 @@
           '<span class="sh-grade-pill" id="sh-objective">Explore</span></div>' +
         '<div class="sh-stop-row"><span class="sh-stop-name" id="sh-stop-name">IISER Vithura Campus</span>' +
           '<span class="sh-stop-dist" id="sh-dist"></span></div>' +
+        '<div class="sh-timing" id="sh-timing"></div>' +
         '<div class="sh-status" id="sh-status">W / S throttle &middot; A / D steer &middot; C camera &middot; H horn</div>' +
         '<div class="sh-actions">' +
           '<button class="btn" type="button" id="sh-horn">Horn</button>' +
@@ -2394,6 +2473,7 @@
       fuel: hud.querySelector('#sh-fuel'),
       cash: hud.querySelector('#sh-cash'),
       passengers: hud.querySelector('#sh-passengers'),
+      timing: hud.querySelector('#sh-timing'),
       health: hud.querySelector('#sh-health'),
       fines: hud.querySelector('#sh-fines'),
       temp: hud.querySelector('#sh-temp'),
@@ -2555,12 +2635,14 @@
       game.stopPtr = 0;
       game.laps = 0;
       game.passengers = 0;
+      game.onboard.length = 0;
       game.score = 0;
       game.dwellStopIndex = -1;
       game.dwellTime = 0;
       game.dwellAlighted = 0;
-      game.objectiveText = ROUTES[0].name;
-      game.detailText = 'Pick up students and complete all 8 stops on Route 101.';
+      game.objectiveText = ROUTES[game.routeIdx].name;
+      game.detailText = 'Pick up students and complete all ' + ROUTES[game.routeIdx].stops.length +
+        ' stops on Route ' + ROUTES[game.routeIdx].id + '.';
       game.statusText = 'Route 101 · next stop loading…';
       switchVehicle('transit');
     } else if (id === 'trial') {
@@ -2649,6 +2731,7 @@
     game.nextStopIndex = -1;
     if (!busState.active) {
       ringPulse(-1, t);
+      if (navArrow) navArrow.visible = false;
       return;
     }
 
@@ -2667,7 +2750,7 @@
       if (game.dwellStopIndex < 0 && d < 11 && Math.abs(busState.speed) < 0.8) {
         game.dwellStopIndex = stopIdx;
         game.dwellTime = 0;
-        game.dwellAlighted = spawnAlightingPassengers(1 + Math.floor(Math.random() * 2),
+        game.dwellAlighted = spawnAlightingPassengers(takePassengersForStop(stopIdx),
           st.shelterX != null ? st.shelterX : st.x,
           st.shelterZ != null ? st.shelterZ : st.z);
         if (game.dwellAlighted > 0) {
@@ -2794,6 +2877,8 @@
       game.nextStopIndex = near ? near.idx : -1;
       ringPulse(near ? near.idx : -1, t);
     }
+
+    updateNavArrow(t);
   }
 
   // ---------- Vehicle pose, suspension and light rig ----------
@@ -3140,6 +3225,19 @@
     ui.fuel.textContent = vehicleNeedsEnabled ? Math.round(busState.fuel) + '%' : 'OFF';
     ui.cash.textContent = '₹' + Math.floor(game.score).toLocaleString('en-IN');
     ui.passengers.textContent = String(game.passengers);
+    // Route timing line: estimated trip duration plus published schedule.
+    if (ui.timing) {
+      const routesInfo = getRoutesInfo();
+      const activeRoute = routesInfo.routes[routesInfo.activeIdx];
+      const onRoute = busState.mode === 'route' || busState.mode === 'trial';
+      if (onRoute && activeRoute && activeRoute.estMinutes) {
+        ui.timing.textContent = '~' + activeRoute.estMinutes + ' min trip' +
+          (activeRoute.schedule ? ' · ' + activeRoute.schedule : '');
+        ui.timing.style.display = '';
+      } else {
+        ui.timing.style.display = 'none';
+      }
+    }
     ui.rescueBtn.classList.toggle('hidden', !vehicleNeedsEnabled || !busState.active || busState.fuel > 0.5);
     ui.temp.textContent = Math.round(busState.temp) + '°';
     ui.odo.textContent = busState.odo.toFixed(1);
@@ -3257,7 +3355,10 @@
     enabled: false, room: '', channel: null, ws: null, wsOpen: false,
     transport: 'pending', role: 'join',
     serverId: '', peers: new Map(), lastSend: 0, lastBoard: 0,
-    status: 'Solo session · 8-player rooms available'
+    status: 'Solo session · 8-player rooms available',
+    // Smooth interpolation settings
+    interpolationDelay: 0.08, // 80ms interpolation delay for smooth remote movement
+    lastReceiveTime: 0
   };
   const _mpV = new T.Vector3();
 
@@ -3843,7 +3944,7 @@
       if (!groups.has(k)) groups.set(k, []);
       groups.get(k).push(r);
     }
-    const order = ['route', 'trial', 'park', 'safari', 'free', 'multi'];
+    const order = ['route', 'free', 'multi'];
     for (const k of groups.keys()) if (order.indexOf(k) < 0) order.push(k);
     let html = '';
     for (const modeId of order) {
@@ -3904,11 +4005,8 @@
               '</select></div>' +
             '<div class="mp-field"><label for="mp-mode">Game mode</label>' +
               '<select id="mp-mode" class="mp-input">' +
-                '<option value="route">Shuttle 101 (score attack)</option>' +
-                '<option value="trial">Time Trial (best lap)</option>' +
-                '<option value="park">Precision Park</option>' +
-                '<option value="safari">Buggy Safari</option>' +
-                '<option value="free">Free Drive</option>' +
+                '<option value="route">Mission (shuttle run)</option>' +
+                '<option value="free">Free Ride</option>' +
                 '<option value="multi">8P Cruise (freeroam)</option>' +
               '</select></div>' +
           '</div>' +
@@ -4005,42 +4103,143 @@
     else modal.querySelector('#mp-modal-status').textContent = 'Ready. Create a room or enter a code to join.';
   }
 
+  // Visual trail particles for remote vehicles
+  const peerTrails = new Map();
+  
+  function createPeerTrail(peerId) {
+    const trail = {
+      positions: [],
+      mesh: null,
+      peerId
+    };
+    // Create a small ring mesh for the trail marker
+    const ringGeo = new T.RingGeometry(0.15, 0.25, 8);
+    const ringMat = new T.MeshBasicMaterial({ 
+      color: 0xffffff, 
+      transparent: true, 
+      opacity: 0.4,
+      side: T.DoubleSide,
+      depthWrite: false
+    });
+    trail.mesh = new T.Mesh(ringGeo, ringMat.clone());
+    trail.mesh.rotation.x = -Math.PI / 2;
+    trail.mesh.position.y = 0.05;
+    scene.add(trail.mesh);
+    return trail;
+  }
+  
+  function updatePeerTrails(t) {
+    for (const [peerId, trail] of peerTrails.entries()) {
+      const peer = mp.peers.get(peerId);
+      if (!peer || !trail.mesh) {
+        if (trail.mesh) {
+          scene.remove(trail.mesh);
+          trail.mesh.geometry.dispose();
+          trail.mesh.material.dispose();
+        }
+        peerTrails.delete(peerId);
+        continue;
+      }
+      
+      // Update trail position to follow peer with slight delay
+      trail.mesh.position.set(peer.x, peer.y + 0.02, peer.z);
+      
+      // Pulse opacity based on peer speed
+      const speedNorm = Math.min(1, Math.abs(peer.speed) / 15);
+      trail.mesh.material.opacity = 0.15 + speedNorm * 0.35;
+      trail.mesh.scale.setScalar(0.8 + speedNorm * 0.4);
+      
+      // Color based on player color
+      const color = PLAYER_COLORS[peer.colorIdx % PLAYER_COLORS.length];
+      trail.mesh.material.color.setHex(color.hex);
+    }
+  }
+  
   function updateMultiplayer(dt, t) {
     if (mp.enabled && busState.active && t - mp.lastSend > 0.11) {
       mp.lastSend = t;
       sendMpState();
     }
+    
+    const interpK = Math.min(1, dt * 10); // Faster interpolation for smoother movement
+    
     for (const peer of mp.peers.values()) {
-      const k = Math.min(1, dt * 8);
-      peer.x += (peer.tx - peer.x) * k;
-      peer.z += (peer.tz - peer.z) * k;
-      peer.y += (peer.ty - peer.y) * k;
-      peer.heading = normAng(peer.heading + normAng(peer.targetHeading - peer.heading) * k);
+      // Improved smoothing with configurable interpolation delay
+      const k = Math.min(1, dt * 12);
+      
+      // Smooth position interpolation with extra smoothing for distant peers
+      const dist = Math.hypot(peer.tx - peer.x, peer.tz - peer.z);
+      const smoothFactor = dist > 20 ? 0.85 : 1.0; // Less smoothing for nearby peers (more responsive)
+      const effectiveK = Math.min(1, k * smoothFactor);
+      
+      peer.x += (peer.tx - peer.x) * effectiveK;
+      peer.z += (peer.tz - peer.z) * effectiveK;
+      peer.y += (peer.ty - peer.y) * effectiveK;
+      
+      // Smoother heading interpolation
+      const headingDiff = normAng(peer.targetHeading - peer.heading);
+      peer.heading = normAng(peer.heading + headingDiff * effectiveK * 0.9);
+      
+      // Update rig position with smooth Y adjustment
       if (peer.rig && peer.rig.root) {
-        peer.rig.root.position.set(peer.x, peer.y + 0.03, peer.z);
+        const targetY = peer.y + 0.03;
+        peer.rig.root.position.y += (targetY - peer.rig.root.position.y) * effectiveK;
+        peer.rig.root.position.x = peer.x;
+        peer.rig.root.position.z = peer.z;
         peer.rig.root.rotation.order = 'YXZ';
         peer.rig.root.rotation.y = peer.heading;
+        
+        // Spin wheels based on speed
         const spin = (peer.speed / 0.48) * dt;
         if (peer.rig.glbWheels) {
           for (const w of peer.rig.glbWheels) if (w.spinPivot) w.spinPivot.rotation.x += spin;
         }
+        
+        // Update trail visibility based on peer activity
+        if (!peerTrails.has(peer.id)) {
+          createPeerTrail(peer.id);
+        }
       }
+      
+      // Update name tag with better positioning
       if (peer.tag) {
         if (!busState.active || !mp.enabled) {
           peer.tag.style.display = 'none';
         } else {
-          _mpV.set(peer.x, peer.y + 3.6, peer.z).project(camera);
-          if (_mpV.z > 1 || _mpV.z < -1) {
+          _mpV.set(peer.x, peer.y + 3.8, peer.z).project(camera);
+          if (_mpV.z > 1 || _mpV.z < -1 || _mpV.z < -0.01) {
             peer.tag.style.display = 'none';
           } else {
             peer.tag.style.display = 'flex';
             peer.tag.style.left = '0px';
             peer.tag.style.top = '0px';
-            peer.tag.style.transform = 'translate(' + ((_mpV.x * 0.5 + 0.5) * window.innerWidth).toFixed(1) + 'px,' + ((-_mpV.y * 0.5 + 0.5) * window.innerHeight).toFixed(1) + 'px) translate(-50%,-100%)';
+            const screenX = ((_mpV.x * 0.5 + 0.5) * window.innerWidth).toFixed(1);
+            const screenY = ((-_mpV.y * 0.5 + 0.5) * window.innerHeight).toFixed(1);
+            peer.tag.style.transform = 'translate(' + screenX + 'px,' + screenY + 'px) translate(-50%,-100%)';
+            
+            // Dynamic tag opacity based on distance
+            const distToCam = Math.hypot(peer.x - camera.position.x, peer.z - camera.position.z);
+            const tagOpacity = Math.min(1, Math.max(0.3, 1 - (distToCam - 30) / 170));
+            peer.tag.style.opacity = tagOpacity;
           }
         }
       }
     }
+    
+    // Clean up trails for disconnected peers
+    for (const [peerId, trail] of peerTrails.entries()) {
+      if (!mp.peers.has(peerId)) {
+        if (trail.mesh) {
+          scene.remove(trail.mesh);
+          trail.mesh.geometry.dispose();
+          trail.mesh.material.dispose();
+        }
+        peerTrails.delete(peerId);
+      }
+    }
+    
+    updatePeerTrails(t);
+    
     if (t - mp.lastBoard > 0.55) {
       mp.lastBoard = t;
       updateMpBoard();
@@ -4050,8 +4249,19 @@
 
   // ---------- Frame loop hooks ----------
   // Waiting students walk to the bus door and climb aboard when the bus dwells at a stop;
-  // passengers alight onto the shelter side. Fares ₹20 per boarding student.
+  // passengers alight onto the shelter side. Each student has a destination stop,
+  // and pays a distance-based fare (₹10 base + ₹15/km) when they board.
   const alightingStudents = [];
+
+  // Riders only get off where they were actually going, so the fare they paid
+  // matches the ride they took.
+  function takePassengersForStop(stopIdx) {
+    let n = 0;
+    for (let i = game.onboard.length - 1; i >= 0; i--) {
+      if (game.onboard[i] === stopIdx) { game.onboard.splice(i, 1); n++; }
+    }
+    return n;
+  }
 
   function spawnAlightingPassengers(count, shelX, shelZ) {
     const n = Math.min(game.passengers, count);
@@ -4078,8 +4288,8 @@
     return n;
   }
 
-  // Free Drive, Time Trial, Parking and Multiplayer still honour the campus
-  // pickup points: stop the bus inside a stop bay and students walk aboard.
+  // Free Ride and Multiplayer still honour the campus pickup points:
+  // stop the bus inside a stop bay and students walk aboard.
   function updateStopService(dt, t) {
     if (!busState.active || busState.vehicle !== 'bus' || busState.mode === 'route') return;
     const near = nearestBusStop(busState.x, busState.z);
@@ -4090,7 +4300,7 @@
         game.dwellStopIndex = near.idx;
         game.dwellTime = 0;
         const st = near.stop;
-        game.dwellAlighted = spawnAlightingPassengers(1 + Math.floor(Math.random() * 2),
+        game.dwellAlighted = spawnAlightingPassengers(takePassengersForStop(near.idx),
           st.shelterX != null ? st.shelterX : st.x,
           st.shelterZ != null ? st.shelterZ : st.z);
         if (game.dwellAlighted > 0) {
@@ -4113,7 +4323,12 @@
         m.position.y = s.home.y + Math.abs(Math.sin(t * 1.7 + s.phase)) * 0.018;
         m.rotation.y = s.homeRot + Math.sin(t * 0.55 + s.phase) * 0.22;
         const st = BUS_STOPS[s.stopIndex];
-        if (busState.active && busState.vehicle === 'bus' && game.dwellStopIndex === s.stopIndex && Math.abs(busState.speed) < 0.8) {
+        const full = game.passengers >= BUS_CAPACITY;
+        if (full && game.dwellStopIndex === s.stopIndex && t - (game.fullNoticeAt || 0) > 7) {
+          game.fullNoticeAt = t;
+          flashNotice('Bus full · ' + game.passengers + ' on board, drop passengers first', 'bad');
+        }
+        if (!full && busState.active && busState.vehicle === 'bus' && game.dwellStopIndex === s.stopIndex && Math.abs(busState.speed) < 0.8) {
           const d = Math.hypot(busState.x - st.x, busState.z - st.z);
           if (d < 11) {
             const shx = s.shelterX != null ? s.shelterX : st.x;
@@ -4147,10 +4362,13 @@
         if (k >= 1) {
           m.visible = false;
           s.state = 'gone';
-          s.respawnAt = t + 20 + ((i * 7 + 3) % 13);
+          s.respawnAt = t + 7 + ((i * 5 + 2) % 9);
           game.passengers += 1;
-          game.score += 20; // ₹20 fare per passenger
-          flashNotice('+₹20 · passenger boarded', 'good');
+          if (s.destIndex != null) game.onboard.push(s.destIndex);
+          const fare = s.fare != null ? s.fare : 20;
+          game.score += fare;
+          const destName = s.destIndex != null && BUS_STOPS[s.destIndex] ? BUS_STOPS[s.destIndex].name : '';
+          flashNotice('+₹' + fare + (destName ? ' · to ' + destName : ' · passenger boarded'), 'good');
           if (audioCtx) { try { playStopChime(); } catch (_) {} }
         }
         continue;
@@ -4161,6 +4379,9 @@
           m.scale.setScalar(0.94 + ((s.stopIndex + i) % 3) * 0.035);
           m.visible = true;
           s.state = 'waiting';
+          // A fresh commuter, with their own destination and fare.
+          s.destIndex = pickDestination(s.stopIndex);
+          s.fare = fareForStops(s.stopIndex, s.destIndex);
         }
         continue;
       }
@@ -4217,6 +4438,7 @@
       const info = getRoutesInfo();
       const active = info.routes[info.activeIdx];
       const routeMode = busState.mode === 'route' || busState.mode === 'trial';
+      const next = game.nextStopIndex >= 0 && busState.mode !== 'park' ? BUS_STOPS[game.nextStopIndex] : null;
       if (active && routeMode) {
         ctx.save();
         ctx.strokeStyle = active.color;
@@ -4230,90 +4452,186 @@
         });
         ctx.closePath();
         ctx.stroke();
+        // Direction-of-travel dashes drifting along the line.
+        ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+        ctx.lineWidth = 1.3;
+        ctx.setLineDash([7, 9]);
+        ctx.lineDashOffset = -(performance.now() * 0.03) % 16;
+        ctx.stroke();
+        ctx.setLineDash([]);
         ctx.restore();
       }
 
+      // Draw all bus stops with labels
       for (let i = 0; i < BUS_STOPS.length; i++) {
         const st = BUS_STOPS[i];
         const sx = mx(st.x), sy = my(st.z);
-        ctx.fillStyle = '#f4efe3';
+        const isActiveRouteStop = active && routeMode && active.stops.some(s => s.index === i);
+        ctx.fillStyle = isActiveRouteStop ? active.color : '#f4efe3';
         ctx.strokeStyle = '#101713';
-        ctx.lineWidth = 1.2;
+        ctx.lineWidth = isActiveRouteStop ? 1.8 : 1.0;
         ctx.beginPath();
-        ctx.arc(sx, sy, 2.7, 0, Math.PI * 2);
+        ctx.arc(sx, sy, isActiveRouteStop ? 3.6 : 2.2, 0, Math.PI * 2);
         ctx.fill();
         ctx.stroke();
-      }
-
-      if (active && routeMode) {
-        ctx.save();
-        ctx.globalAlpha = 0.95;
-        for (const st of active.stops) {
-          ctx.fillStyle = active.color;
-          ctx.beginPath();
-          ctx.arc(mx(st.x), my(st.z), 2.4, 0, Math.PI * 2);
-          ctx.fill();
+        // Draw stop number label for route stops
+        if (isActiveRouteStop) {
+          ctx.fillStyle = '#101713';
+          ctx.font = 'bold 8px system-ui, sans-serif';
+          ctx.textAlign = 'center';
+          const stopNum = active.stops.findIndex(s => s.index === i) + 1;
+          ctx.fillText(String(stopNum), sx, sy + 3);
         }
-        ctx.restore();
       }
 
       // Next pickup: pulsing ring plus a bearing line from the bus.
-      const next = game.nextStopIndex >= 0 ? BUS_STOPS[game.nextStopIndex] : null;
       if (next && busState.initialized) {
         const nx = mx(next.x), ny = my(next.z);
+        const cw = ctx.canvas.width, chh = ctx.canvas.height;
+        const offScreen = nx < 10 || nx > cw - 10 || ny < 10 || ny > chh - 10;
+
+        // When the zoomed view pushes the next stop off the panel, pin an arrow
+        // to the edge so the driver still knows which way to go.
+        if (offScreen) {
+          const px = Math.max(10, Math.min(cw - 10, nx));
+          const py = Math.max(10, Math.min(chh - 10, ny));
+          const ang = Math.atan2(ny - my(busState.z), nx - mx(busState.x));
+          ctx.save();
+          ctx.translate(px, py);
+          ctx.rotate(ang);
+          ctx.fillStyle = routeMode && active ? active.color : '#ffc66e';
+          ctx.strokeStyle = 'rgba(10,18,13,0.85)';
+          ctx.lineWidth = 1.2;
+          ctx.beginPath();
+          ctx.moveTo(6, 0);
+          ctx.lineTo(-4, 4.2);
+          ctx.lineTo(-4, -4.2);
+          ctx.closePath();
+          ctx.fill();
+          ctx.stroke();
+          ctx.restore();
+        }
+        // Bearing line from bus to next stop
         ctx.save();
-        ctx.setLineDash([4, 4]);
-        ctx.strokeStyle = 'rgba(255,255,255,0.65)';
-        ctx.lineWidth = 1.1;
+        ctx.setLineDash([5, 4]);
+        ctx.strokeStyle = routeMode && active ? active.color : 'rgba(255,255,255,0.7)';
+        ctx.lineWidth = 2;
+        ctx.globalAlpha = 0.8;
         ctx.beginPath();
         ctx.moveTo(mx(busState.x), my(busState.z));
         ctx.lineTo(nx, ny);
         ctx.stroke();
         ctx.setLineDash([]);
+        // Pulsing destination ring
+        const pulse = 5.5 + Math.sin(performance.now() * 0.0045) * 1.5;
         ctx.strokeStyle = routeMode && active ? active.color : '#ffc66e';
-        ctx.lineWidth = 1.8;
+        ctx.lineWidth = 2.2;
+        ctx.globalAlpha = 0.95;
         ctx.beginPath();
-        ctx.arc(nx, ny, 5.4 + Math.sin(performance.now() * 0.0042) * 1.2, 0, Math.PI * 2);
+        ctx.arc(nx, ny, pulse, 0, Math.PI * 2);
         ctx.stroke();
+        // Center dot
+        ctx.fillStyle = routeMode && active ? active.color : '#ffc66e';
+        ctx.beginPath();
+        ctx.arc(nx, ny, 2.5, 0, Math.PI * 2);
+        ctx.fill();
+        // Glow ring
+        ctx.strokeStyle = routeMode && active ? active.color : '#ffc66e';
+        ctx.globalAlpha = 0.3;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.arc(nx, ny, pulse + 3, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.globalAlpha = 1.0;
+        // Label: next stop name
+        if (routeMode && active) {
+          ctx.fillStyle = '#fff';
+          ctx.font = 'bold 9px system-ui, sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillText(next.name, nx, ny - 8);
+        }
         ctx.restore();
       }
+      
+      // AI traffic cars
       for (let i = 0; i < aiCars.length; i++) {
         const c = aiCars[i];
-        ctx.fillStyle = 'rgba(240,230,200,0.72)';
+        ctx.fillStyle = 'rgba(240,230,200,0.6)';
         ctx.beginPath();
-        ctx.arc(mx(c.x), my(c.z), 1.7, 0, Math.PI * 2);
+        ctx.arc(mx(c.x), my(c.z), 1.2, 0, Math.PI * 2);
         ctx.fill();
       }
+      
+      // Fuel stations
       for (const station of FUEL_ZONES) {
         ctx.fillStyle = '#45d8e8';
         ctx.strokeStyle = '#072127';
-        ctx.lineWidth = 1;
+        ctx.lineWidth = 1.2;
         ctx.beginPath();
-        ctx.arc(mx(station.x), my(station.z), 3.4, 0, Math.PI * 2);
+        ctx.arc(mx(station.x), my(station.z), 3.2, 0, Math.PI * 2);
         ctx.fill();
         ctx.stroke();
+        ctx.fillStyle = '#072127';
+        ctx.font = '7px system-ui, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('⛽', mx(station.x), my(station.z) + 2.5);
       }
+      
+      // Multiplayer peers
       if (mp.enabled) {
         for (const p of mp.peers.values()) {
           ctx.fillStyle = PLAYER_COLORS[p.colorIdx % PLAYER_COLORS.length].css;
           ctx.beginPath();
-          ctx.arc(mx(p.x), my(p.z), 2.8, 0, Math.PI * 2);
+          ctx.arc(mx(p.x), my(p.z), 3.0, 0, Math.PI * 2);
           ctx.fill();
+          ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+          ctx.lineWidth = 1;
+          ctx.stroke();
         }
       }
+      
+      // Player bus: larger, with heading indicator and glow
       if (busState.initialized) {
+        const bx = mx(busState.x), by = my(busState.z);
+        // Outer glow ring, breathing with the drive
         ctx.save();
-        ctx.translate(mx(busState.x), my(busState.z));
-        // The triangle points down for +Z; positive game yaw turns toward +X.
-        ctx.rotate(-busState.heading);
-        ctx.fillStyle = '#ffd166';
+        const glow = 7.5 + Math.sin(performance.now() * 0.005) * 1.6;
+        ctx.fillStyle = 'rgba(255,209,102,0.15)';
         ctx.beginPath();
-        ctx.moveTo(0, 5.5);
-        ctx.lineTo(3.4, -4.2);
-        ctx.lineTo(-3.4, -4.2);
-        ctx.closePath();
+        ctx.arc(bx, by, glow, 0, Math.PI * 2);
         ctx.fill();
         ctx.restore();
+        // Vehicle triangle with heading
+        ctx.save();
+        ctx.translate(bx, by);
+        ctx.rotate(-busState.heading);
+        // Shadow/depth
+        ctx.fillStyle = 'rgba(0,0,0,0.3)';
+        ctx.beginPath();
+        ctx.moveTo(0, 6.5);
+        ctx.lineTo(4.2, -4.8);
+        ctx.lineTo(-4.2, -4.8);
+        ctx.closePath();
+        ctx.fill();
+        // Main vehicle
+        ctx.fillStyle = '#ffd166';
+        ctx.beginPath();
+        ctx.moveTo(0, 5.8);
+        ctx.lineTo(3.6, -4.2);
+        ctx.lineTo(-3.6, -4.2);
+        ctx.closePath();
+        ctx.fill();
+        // Center highlight
+        ctx.fillStyle = '#fff';
+        ctx.beginPath();
+        ctx.arc(0, 0, 1.5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+        // Bus label
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 8px system-ui, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('YOU', bx, by - 10);
       }
     });
   }
@@ -4327,6 +4645,8 @@
         id: r.id,
         name: r.name,
         color: ROUTE_COLORS[i % ROUTE_COLORS.length],
+        estMinutes: r.estMinutes || 20,
+        schedule: r.schedule || '',
         stops: r.stops.map(si => ({
           index: si, id: BUS_STOPS[si].id, name: BUS_STOPS[si].name,
           x: BUS_STOPS[si].x, z: BUS_STOPS[si].z

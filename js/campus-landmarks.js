@@ -291,9 +291,9 @@
     // Level terrace for Indoor Stadium
     { type: 'pad', polygon: scaleRing(stdFoot, 368.0, 463.0, 1.15), targetY: 115.2, margin: 10.0 },
     // Level terrace for Oval Walking Park below Cake World
-    { type: 'pad', polygon: rectPoly(398.5, 195.0, 74.0, 29.0, -32), targetY: 131.0, margin: 8.0 },
-    // Level terrace for Q-Park, offset clear of the service road along its west edge
-    { type: 'pad', polygon: rectPoly(441.2, 173.2, 44.0, 24.0, -32), targetY: 145.2, margin: 7.0 },
+    { type: 'pad', polygon: rectPoly(398.5, 195.0, 72.0, 28.0, 18), targetY: 131.0, margin: 5.0 },
+    // Level terrace for Q-Park, aligned with the service road and kept off its lane
+    { type: 'pad', polygon: rectPoly(441.2, 171.2, 38.0, 16.0, 18), targetY: 145.2, margin: 2.5 },
     // Level terrace for Bus Terminal Semi-Circular Arcade
     { type: 'pad', polygon: rectPoly(256.0, 452.0, 62.0, 56.0, 0), targetY: 109.2, margin: 9.0 },
     // Level terrace for Students Recreation & Indoor Games Hall
@@ -812,18 +812,20 @@
 
     // --- C. Q-PARK (QUANTUM PARK) & OVAL WALKING TRACK (445, 170 & 398, 195) ---
     {
-      // 1. Upper Q-Park Stargazing & Hangout Lawn, shifted clear of the service-road edge
-      const qy = heightAt(441.2, 173.2);
+      // 1. Upper Q-Park Stargazing & Hangout Lawn, pulled back off the service-road edge
+      const qy = heightAt(441.2, 171.2);
       const qpark = new T.Group();
-      qpark.position.set(441.2, qy + 0.08, 173.2);
-      qpark.rotation.y = 32 * Math.PI / 180;
+      qpark.position.set(441.2, qy + 0.08, 171.2);
+      // Angled with the service road instead of across it, so the lawn never
+      // reaches out over the lane and traps the bus.
+      qpark.rotation.y = -18 * Math.PI / 180;
 
       // Manicured lush green Q-Park lawn pad with stone curb
-      const qCurb = new T.Mesh(new T.BoxGeometry(40.0, 0.36, 20.0), stoneMat);
+      const qCurb = new T.Mesh(new T.BoxGeometry(36.0, 0.36, 14.0), stoneMat);
       qCurb.position.y = 0.05;
       qCurb.receiveShadow = true;
       qpark.add(qCurb);
-      const qLawn = new T.Mesh(new T.BoxGeometry(38.8, 0.40, 18.8), lawnMat);
+      const qLawn = new T.Mesh(new T.BoxGeometry(34.8, 0.40, 13.0), lawnMat);
       qLawn.position.y = 0.08;
       qLawn.receiveShadow = true;
       qpark.add(qLawn);
@@ -864,7 +866,7 @@
       });
       if (nightMaterials) nightMaterials.push({ mat: bollardGlow, color: new T.Color(0xffb85c), intensity: 2.2 });
       for (let bx = -16; bx <= 16; bx += 8) {
-        for (const bz of [-7.5, 7.5]) {
+        for (const bz of [-5.6, 5.6]) {
           const bol = new T.Mesh(new T.CylinderGeometry(0.10, 0.12, 0.85, 8), darkSteelMat);
           bol.position.set(bx, 0.65, bz);
           qpark.add(bol);
@@ -879,7 +881,8 @@
       const oy = heightAt(398.5, 195.0);
       const oval = new T.Group();
       oval.position.set(398.5, oy + 0.10, 195.0);
-      oval.rotation.y = 32 * Math.PI / 180;
+      // Lined up with the lane so the track rim stays clear of the road.
+      oval.rotation.y = -18 * Math.PI / 180;
 
       const trackOuter = new T.Mesh(new T.CylinderGeometry(13.5, 13.8, 0.26, 36), trackMat);
       trackOuter.scale.set(2.55, 1, 1);

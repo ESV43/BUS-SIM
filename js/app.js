@@ -399,7 +399,7 @@
   if (!/^(auto|low|medium|high)$/.test(qualityMode)) qualityMode = 'auto';
   const perf = { scale: mobileDevice ? 0.60 : 0.72, ema: 1 / 60, lastAdjust: 0 };
   function shadowResolutionFor(mode) {
-    if (mode === 'high') return 1536;
+    if (mode === 'high') return 2048;
     if (mode === 'medium' && !isSoftwareGL && !mobileDevice && window.innerWidth >= 900) return 1024;
     return 512;
   }
@@ -3441,6 +3441,15 @@
     });
     navCtx.closePath();
     navCtx.stroke();
+    if (active) {
+      navCtx.shadowBlur = 0;
+      navCtx.strokeStyle = 'rgba(255,255,255,0.55)';
+      navCtx.lineWidth = 1.5;
+      navCtx.setLineDash([9, 12]);
+      navCtx.lineDashOffset = -(performance.now() * 0.035) % 21;
+      navCtx.stroke();
+      navCtx.setLineDash([]);
+    }
     navCtx.restore();
   }
 
@@ -3990,6 +3999,21 @@
   function miniX(x) { return (x + GW / 2) / GW * MINI_W; }
   function miniY(z) { return (z + GH / 2) / GH * MINI_H; }
 
+  // Live minimap view. The baked base map covers the whole campus, so the
+  // panel crops and scales a window around the vehicle instead of shrinking
+  // everything down to a few unreadable pixels.
+  // Zoom breathes with speed: tight around the bus when crawling, wide on the highway.
+  const MINI_ZOOM_STOPPED = 2.7, MINI_ZOOM_FAST = 1.5;
+  let miniZoom = 2.2;
+  let viewLeft = -GW / 2, viewTop = -GH / 2;
+  let viewW = GW / miniZoom, viewH = GH / miniZoom;
+  let miniFocusX = 0, miniFocusZ = 0, miniViewReady = false;
+  let lastRawX = 0, lastRawZ = 0, miniDirX = 0, miniDirZ = 0;
+  const miniTrail = [];
+  const MINI_TRAIL_MAX = 60;
+  function viewX(x) { return (x - viewLeft) / viewW * MINI_W; }
+  function viewY(z) { return (z - viewTop) / viewH * MINI_H; }
+
   // Shared procedural 2D vector renderer (dark nav style) used by the minimap and the fullscreen navigation map
   // xform: { X, Y, pxPerM, w, h, detail: 'full' | 'mini' }
   function drawVectorMap(ctx, xform) {
@@ -4112,16 +4136,84 @@
   const minimapHooks = [];
   let miniAt = 0;
   function updateMinimap() {
-    if (now() - miniAt < 80) return;
+    if (now() - miniAt < 60) return;
     miniAt = now();
-    mctx.clearRect(0, 0, MINI_W, MINI_H);
-    mctx.drawImage(miniBase, 0, 0);
+    // Follow the vehicle, panning smoothly so the crop does not jitter.
+    const liveState = window.ShuttleGame && window.ShuttleGame.getState ? window.ShuttleGame.getState() : null;
+    const live = liveState && liveState.initialized ? liveState : null;
+    const fxp = live ? live.x : cam.target.x;
+    const fzp = live ? live.z : cam.target.z;
+    const speedAbs = live ? Math.abs(live.speed || 0) : 0;
 
-    for (const fn of minimapHooks) fn(mctx, miniX, miniY);
+    if (!miniViewReady) {
+      miniFocusX = fxp; miniFocusZ = fzp;
+      lastRawX = fxp; lastRawZ = fzp;
+      miniViewReady = true;
+    }
+
+    // Heading comes from real movement, so it stays correct through reverses.
+    const rdx = fxp - lastRawX, rdz = fzp - lastRawZ;
+    const rlen = Math.hypot(rdx, rdz);
+    if (rlen > 0.25 && rlen < 60) { miniDirX = rdx / rlen; miniDirZ = rdz / rlen; }
+    else if (rlen >= 60) miniTrail.length = 0; // teleport / respawn: no long streak
+    lastRawX = fxp; lastRawZ = fzp;
+
+    const speedNorm = clamp(speedAbs / 16, 0, 1);
+    const zoomTarget = MINI_ZOOM_STOPPED - (MINI_ZOOM_STOPPED - MINI_ZOOM_FAST) * speedNorm;
+    miniZoom += (zoomTarget - miniZoom) * 0.08;
+    viewW = GW / miniZoom;
+    viewH = GH / miniZoom;
+
+    // Bias the crop toward the road ahead instead of centring on the bumper.
+    const lookAhead = Math.min(120, speedAbs * 7) * 0.6;
+    miniFocusX += (fxp + miniDirX * lookAhead - miniFocusX) * 0.25;
+    miniFocusZ += (fzp + miniDirZ * lookAhead - miniFocusZ) * 0.25;
+    viewLeft = clamp(miniFocusX - viewW / 2, -GW / 2, GW / 2 - viewW);
+    viewTop = clamp(miniFocusZ - viewH / 2, -GH / 2, GH / 2 - viewH);
+
+    // Breadcrumb trail of where the bus has actually been.
+    if (live) {
+      const last = miniTrail[miniTrail.length - 1];
+      if (!last || Math.hypot(fxp - last.x, fzp - last.z) > 2.5) {
+        miniTrail.push({ x: fxp, z: fzp });
+        if (miniTrail.length > MINI_TRAIL_MAX) miniTrail.shift();
+      }
+    }
+
+    mctx.clearRect(0, 0, MINI_W, MINI_H);
+    mctx.fillStyle = '#0e1a13';
+    mctx.fillRect(0, 0, MINI_W, MINI_H);
+    mctx.drawImage(
+      miniBase,
+      (viewLeft + GW / 2) / GW * MINI_W, (viewTop + GH / 2) / GH * MINI_H,
+      viewW / GW * MINI_W, viewH / GH * MINI_H,
+      0, 0, MINI_W, MINI_H
+    );
+
+    if (miniTrail.length > 1) {
+      mctx.save();
+      mctx.lineCap = 'round';
+      mctx.lineJoin = 'round';
+      mctx.strokeStyle = '#ffd166';
+      const n = miniTrail.length;
+      for (let i = 1; i < n; i++) {
+        const a = miniTrail[i - 1], b = miniTrail[i];
+        const k = i / n;
+        mctx.globalAlpha = 0.05 + k * 0.45;
+        mctx.lineWidth = 1 + k * 2.2;
+        mctx.beginPath();
+        mctx.moveTo(viewX(a.x), viewY(a.z));
+        mctx.lineTo(viewX(b.x), viewY(b.z));
+        mctx.stroke();
+      }
+      mctx.restore();
+    }
+
+    for (const fn of minimapHooks) fn(mctx, viewX, viewY);
 
     if (!state.cameraExternal) {
-      const tx = miniX(cam.target.x), ty = miniY(cam.target.z);
-      const cx = miniX(camera.position.x), cy = miniY(camera.position.z);
+      const tx = viewX(cam.target.x), ty = viewY(cam.target.z);
+      const cx = viewX(camera.position.x), cy = viewY(camera.position.z);
       mctx.strokeStyle = 'rgba(255,255,255,0.68)';
       mctx.lineWidth = 1.1;
       mctx.beginPath(); mctx.moveTo(tx, ty); mctx.lineTo(cx, cy); mctx.stroke();
@@ -4139,7 +4231,7 @@
     const r = mini.getBoundingClientRect();
     const px = clamp((e.clientX - r.left) / r.width, 0, 1);
     const py = clamp((e.clientY - r.top) / r.height, 0, 1);
-    const x = px * GW - GW / 2, z = py * GH - GH / 2;
+    const x = viewLeft + px * viewW, z = viewTop + py * viewH;
     cancelFly();
     desired.target.set(clamp(x, -GW / 2 + 50, GW / 2 - 50), heightAt(x, z) + 12, clamp(z, -GH / 2 + 50, GH / 2 - 50));
   }

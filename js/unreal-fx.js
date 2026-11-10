@@ -12,24 +12,24 @@
       sunElev: 43,
       sunAzim: 128,
       sunColor: '#fff4df',
-      sunIntensity: 2.35,
+      sunIntensity: 2.5,
       hemiSky: '#a8d0f8',
       hemiGround: '#4a5a3c',
-      hemiIntensity: 0.72,
+      hemiIntensity: 0.75,
       ambColor: '#cde0f5',
-      ambIntensity: 0.12,
+      ambIntensity: 0.14,
       zenith: '#174a8c',
       horizon: '#b8dcf0',
       hazeColor: '#c9e0ec',
-      fogDensity: 0.00018,
-      valleyMist: 0.26,
+      fogDensity: 0.00016,
+      valleyMist: 0.24,
       cloudCoverage: 0.46,
       cloudLight: '#ffffff',
       cloudShadow: '#6d85a3',
-      exposure: 1.02,
-      bloomStrength: 0.28,
-      bloomThreshold: 0.86,
-      envIntensity: 0.92,
+      exposure: 1.05,
+      bloomStrength: 0.30,
+      bloomThreshold: 0.84,
+      envIntensity: 0.95,
       nightFactor: 0.0
     },
     golden: {
@@ -37,24 +37,24 @@
       sunElev: 15.5,
       sunAzim: 248,
       sunColor: '#ffb86c',
-      sunIntensity: 2.65,
+      sunIntensity: 2.8,
       hemiSky: '#8faad6',
       hemiGround: '#4e4132',
-      hemiIntensity: 0.62,
+      hemiIntensity: 0.65,
       ambColor: '#ffd2a6',
-      ambIntensity: 0.10,
+      ambIntensity: 0.12,
       zenith: '#1a3566',
       horizon: '#f5b87a',
       hazeColor: '#eab88b',
-      fogDensity: 0.00026,
-      valleyMist: 0.42,
+      fogDensity: 0.00024,
+      valleyMist: 0.40,
       cloudCoverage: 0.50,
       cloudLight: '#ffe0b5',
       cloudShadow: '#5e5875',
-      exposure: 1.04,
-      bloomStrength: 0.40,
-      bloomThreshold: 0.78,
-      envIntensity: 0.95,
+      exposure: 1.08,
+      bloomStrength: 0.45,
+      bloomThreshold: 0.76,
+      envIntensity: 0.98,
       nightFactor: 0.15
     },
     mist: {
@@ -62,24 +62,24 @@
       sunElev: 28,
       sunAzim: 105,
       sunColor: '#ffeFD8',
-      sunIntensity: 1.55,
+      sunIntensity: 1.65,
       hemiSky: '#b8cdd9',
       hemiGround: '#3e523a',
-      hemiIntensity: 0.85,
+      hemiIntensity: 0.88,
       ambColor: '#d2e2e8',
-      ambIntensity: 0.18,
+      ambIntensity: 0.20,
       zenith: '#4b7394',
       horizon: '#d8e6ea',
       hazeColor: '#d3e3e6',
-      fogDensity: 0.00046,
-      valleyMist: 0.72,
+      fogDensity: 0.00042,
+      valleyMist: 0.68,
       cloudCoverage: 0.68,
       cloudLight: '#f4f8fa',
       cloudShadow: '#7b8d99',
-      exposure: 0.98,
-      bloomStrength: 0.30,
-      bloomThreshold: 0.84,
-      envIntensity: 0.85,
+      exposure: 1.00,
+      bloomStrength: 0.32,
+      bloomThreshold: 0.82,
+      envIntensity: 0.88,
       nightFactor: 0.0
     },
     night: {
@@ -571,11 +571,18 @@
           col *= uExposure;
           col = acesFilm(col);
 
-          // Subtle natural vibrance boost so tropical foliage & terracotta roofs pop cleanly
+          // Natural vibrance boost so tropical foliage & terracotta roofs pop cleanly
           float luma = dot(col, vec3(0.2126, 0.7152, 0.0722));
           float sat = length(col - vec3(luma));
-          col = mix(vec3(luma), col, 1.0 + 0.11 * (1.0 - sat));
+          col = mix(vec3(luma), col, 1.0 + 0.14 * (1.0 - sat));
+          
+          // Subtle contrast boost for better depth perception
+          col = clamp((col - 0.04) * 1.04, 0.0, 1.0);
 
+          // Vignette for cinematic depth
+          float vignette = 1.0 - length(vUv - 0.5) * 0.35;
+          col *= vignette;
+          
           // Linear -> sRGB gamma
           col = pow(max(col, vec3(0.0)), vec3(1.0 / 2.2));
           gl_FragColor = vec4(col, 1.0);
