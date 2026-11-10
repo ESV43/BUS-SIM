@@ -114,6 +114,40 @@
       r.width = Math.max(r.width, 8.2);
     }
 
+      // Round off kinks that are tighter than the road is wide. A 90deg corner on a
+    // 5.6m road makes the asphalt ribbon fold through itself (the miter clamp in
+    // ribbonInto can only bend so far), leaving slivers and dark wedges at the
+    // vertex. Bowing the kink into its neighbourhood spreads the turn over a real
+    // radius instead of stacking sub-metre vertices, so the ribbon never inverts.
+    // Endpoints are pinned, so junction joins stay exactly where they were.
+    const roundSharpCorners = (pts, width) => {
+      const minRadius = Math.max(2.4, width * 1.25);
+      let cur = pts.map(p => p.slice());
+      for (let pass = 0; pass < 26; pass++) {
+        const next = cur.map(p => p.slice());
+        let moved = 0;
+        for (let i = 1; i < cur.length - 1; i++) {
+          const p = cur[i - 1], q = cur[i], s = cur[i + 1];
+          const v1x = q[0] - p[0], v1z = q[1] - p[1];
+          const v2x = s[0] - q[0], v2z = s[1] - q[1];
+          const l1 = Math.hypot(v1x, v1z), l2 = Math.hypot(v2x, v2z);
+          if (l1 < 1e-4 || l2 < 1e-4) continue;
+          const dot = clamp((v1x * v2x + v1z * v2z) / (l1 * l2), -1, 1);
+          const turn = Math.acos(dot); // 0 = straight
+          if (turn < 0.2) continue;
+          const radius = ((l1 + l2) * 0.5) / (2 * Math.tan(turn * 0.5) + 1e-6);
+          if (radius >= minRadius * 2.4) continue;
+          const k = clamp(turn / Math.PI, 0.18, 0.5);
+          next[i][0] = q[0] * (1 - k) + (p[0] + s[0]) * 0.5 * k;
+          next[i][1] = q[1] * (1 - k) + (p[1] + s[1]) * 0.5 * k;
+          moved++;
+        }
+        cur = next;
+        if (!moved) break;
+      }
+      return cur;
+    };
+
     // Uniformly resample driveable polylines (~2.4m) & strip duplicate micro-segments that caused slope spikes
     const clean = [r.pts[0].slice()];
     for (let k = 1; k < r.pts.length; k++) {
@@ -126,7 +160,7 @@
         clean.push([prev[0] + (cur[0] - prev[0]) * t, prev[1] + (cur[1] - prev[1]) * t, 0]);
       }
     }
-    r.pts = clean;
+    r.pts = roundSharpCorners(clean, r.width);
   }
 
   // Snap near-junction branch endpoints (< 6.5m) cleanly onto parent road centerlines so asphalt joins seamlessly
@@ -136,6 +170,31 @@
     for (const endIdx of [0, r.pts.length - 1]) {
       const ep = r.pts[endIdx];
       let bestD = 6.5, bx = ep[0], bz = ep[1], found = false;
+      for (let rj = 0; rj < D.roads.length; rj++) {
+        if (rj === ri || !D.roads[rj].isDriveable) continue;
+        const ptsB = D.roads[rj].pts;
+        for (let k = 0; k < ptsB.length - 1; k++) {
+          const a = ptsB[k], b = ptsB[k + 1];
+          const dx = b[0] - a[0], dz = b[1] - a[1], l2 = dx * dx + dz * dz || 1e-6;
+          const t = clamp(((ep[0] - a[0]) * dx + (ep[1] - a[1]) * dz) / l2, 0, 1);
+          const px = a[0] + dx * t, pz = a[1] + dz * t;
+          const d = Math.hypot(ep[0] - px, ep[1] - pz);
+          if (d < bestD) { bestD = d; bx = px; bz = pz; found = true; }
+        }
+      }
+      if (found && bestD > 0.12) { ep[0] = bx; ep[1] = bz; }
+    }
+  }
+
+  // Footways and paths stop short of the kerb in the OSM extract (road #40 ended
+  // 5.7m out in the grass). Tie their open ends to the nearest carriageway too,
+  // so pedestrian links actually land on the road they serve.
+  for (let ri = 0; ri < D.roads.length; ri++) {
+    const r = D.roads[ri];
+    if (r.isDriveable || !r.pts || r.pts.length < 2) continue;
+    for (const endIdx of [0, r.pts.length - 1]) {
+      const ep = r.pts[endIdx];
+      let bestD = 6.0, bx = ep[0], bz = ep[1], found = false;
       for (let rj = 0; rj < D.roads.length; rj++) {
         if (rj === ri || !D.roads[rj].isDriveable) continue;
         const ptsB = D.roads[rj].pts;
@@ -1932,7 +1991,10 @@
         const pl = Math.hypot(pdx, pdz) || 1, nl = Math.hypot(ndx, ndz) || 1;
         const dot = (pdx * ndx + pdz * ndz) / (pl * nl);
         const cosHalf = Math.sqrt(Math.max(0.28, (1 + dot) * 0.5));
-        miter = Math.min(1.9, 1 / cosHalf);
+        // Never let the miter reach further than the vertex spacing: past that the
+        // offset point crosses the neighbouring ring and the asphalt ribbon folds.
+        const spacingCap = Math.max(0.9, Math.min(1.9, (Math.min(pl, nl) * 0.92) / (width * 0.5)));
+        miter = Math.min(1.9, spacingCap, 1 / cosHalf);
       }
       const off = width * 0.5 * miter;
       const nx = -dz, nz = dx;
@@ -4002,9 +4064,10 @@
   // Live minimap view. The baked base map covers the whole campus, so the
   // panel crops and scales a window around the vehicle instead of shrinking
   // everything down to a few unreadable pixels.
-  // Zoom breathes with speed: tight around the bus when crawling, wide on the highway.
-  const MINI_ZOOM_STOPPED = 2.7, MINI_ZOOM_FAST = 1.5;
-  let miniZoom = 2.2;
+  // Fixed, tight zoom. It used to pull back at speed, which made the panel
+  // drift out exactly when the player was watching it most.
+  const MINI_ZOOM = 2.7;
+  const miniZoom = MINI_ZOOM;
   let viewLeft = -GW / 2, viewTop = -GH / 2;
   let viewW = GW / miniZoom, viewH = GH / miniZoom;
   // Heading-up minimap: the whole crop spins so the bus always faces the top.
@@ -4160,14 +4223,12 @@
     else if (rlen >= 60) miniTrail.length = 0; // teleport / respawn: no long streak
     lastRawX = fxp; lastRawZ = fzp;
 
-    const speedNorm = clamp(speedAbs / 16, 0, 1);
-    const zoomTarget = MINI_ZOOM_STOPPED - (MINI_ZOOM_STOPPED - MINI_ZOOM_FAST) * speedNorm;
-    miniZoom += (zoomTarget - miniZoom) * 0.08;
     viewW = GW / miniZoom;
     viewH = GH / miniZoom;
 
-    // Bias the crop toward the road ahead instead of centring on the bumper.
-    const lookAhead = Math.min(120, speedAbs * 7) * 0.6;
+    // Small bias toward the road ahead; kept short so the bus stays near the
+    // middle of the tight crop instead of sliding to the bottom edge.
+    const lookAhead = Math.min(26, speedAbs * 3);
     miniFocusX += (fxp + miniDirX * lookAhead - miniFocusX) * 0.25;
     miniFocusZ += (fzp + miniDirZ * lookAhead - miniFocusZ) * 0.25;
     // Spin the crop so the bus's facing direction points at the top of the

@@ -1108,7 +1108,10 @@
     addOBB(378.0, 333.25, 2.0, 24.5, Math.atan2(-12.0, 43.5), 'Check-Dam Wall');
     addCircle(392.0, 357.0, 4.4, 'Observation Pier');
     addCircle(463.0, 356.0, 4.9, 'Lakeside Gazebo');
-    addOBB(441.2, 173.2, 19.8, 9.8, 32 * Math.PI / 180, 'Q-Park Terrace');
+    // Collider must match the visible lawn exactly (36x14 at -18deg). The previous
+    // box was 39.6x19.6 at +32deg, which reached 3.3m into the service road and
+    // stopped the bus on empty grass.
+    addOBB(441.2, 171.2, 17.0, 6.4, -18 * Math.PI / 180, 'Q-Park Terrace');
     addOBB(114.2, -79.2, 2.9, 1.5, (-28 + 90) * Math.PI / 180, 'Parked Ambulance');
     addCircle(114.5, -127.5, 1.2, 'Shopping Canopy Pillar');
     {
@@ -1181,11 +1184,15 @@
       group.add(teaShop);
       addOBB(tx, tz, 4.8, 3.0, hwyAng + Math.PI, 'Main Gate Roadside Bakery');
 
-      // 2. Vithura Highway Fuel Station & KSRTC Bus Stand (-126, 616)
-      const fx = -126.0, fz = 618.0, fy = heightAt(fx, fz);
+      // 2. Vithura Highway Fuel Station & KSRTC Bus Stand (-119, 619)
+      // Set back from the carriageway and turned to sit ALONG the SH-45 shoulder.
+      // At 0.22rad its 24m pad lay across the highway and one pump island stood
+      // 4.1m inside the lane.
+      const FROT = 1.36;
+      const fx = -119.3, fz = 619.4, fy = heightAt(fx, fz);
       const fuel = new T.Group();
       fuel.position.set(fx, fy, fz);
-      fuel.rotation.y = 0.22;
+      fuel.rotation.y = FROT;
       const fPad = new T.Mesh(new T.BoxGeometry(24.0, 0.24, 14.0), concreteMat);
       fPad.position.y = 0.08; fPad.receiveShadow = true;
       fuel.add(fPad);
@@ -1203,17 +1210,19 @@
           new T.MeshStandardMaterial({ color: 0x185296, roughness: 0.35 }));
         pump.position.set(px, 1.0, 1.45); pump.castShadow = true;
         fuel.add(col, pump);
-        const c = Math.cos(0.22), s = Math.sin(0.22);
+        const c = Math.cos(FROT), s = Math.sin(FROT);
         addCircle(fx + px * c, fz - px * s, 1.15, 'Fuel Pump Island');
       }
       const fOffice = new T.Mesh(new T.BoxGeometry(12.0, 3.8, 5.6), concreteMat);
       fOffice.position.set(0, 1.9, 9.2); fOffice.castShadow = true; fOffice.receiveShadow = true;
       fuel.add(fOffice);
-      addOBB(fx + Math.sin(0.22) * 9.2, fz + Math.cos(0.22) * 9.2, 6.2, 3.0, 0.22, 'Fuel Station Office');
+      addOBB(fx + Math.sin(FROT) * 9.2, fz + Math.cos(FROT) * 9.2, 6.2, 3.0, FROT, 'Fuel Station Office');
       group.add(fuel);
 
-      // 3. Golden Valley / Ponmudi Ghat Viewpoint Pavilion & Forest Checkpost (434, 796)
-      const vx = 434.0, vz = 798.0, vy = heightAt(vx, vz);
+      // 3. Golden Valley / Ponmudi Ghat Viewpoint Pavilion & Forest Checkpost (437, 796)
+      // Nudged off the carriageway: the 6.4m pavilion circle previously reached
+      // 2.3m into the highway.
+      const vx = 437.4, vz = 796.4, vy = heightAt(vx, vz);
       const vp = new T.Group();
       vp.position.set(vx, vy, vz);
       const vpBase = new T.Mesh(new T.CylinderGeometry(6.2, 6.6, 0.75, 8), stoneMat);
