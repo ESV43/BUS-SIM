@@ -4432,7 +4432,18 @@
   W.onFrame(gameLoop);
 
   if (W.onMinimapDraw) {
-    W.onMinimapDraw((ctx, mx, my) => {
+    W.onMinimapDraw((ctx, mx, my, mapRot) => {
+      // The minimap spins with the bus, so text is counter-rotated to stay readable.
+      const label = (text, x, y, font, color, dy) => {
+        ctx.save();
+        ctx.translate(x, y);
+        if (mapRot) ctx.rotate(-mapRot);
+        ctx.fillStyle = color;
+        ctx.font = font;
+        ctx.textAlign = 'center';
+        ctx.fillText(text, 0, dy || 0);
+        ctx.restore();
+      };
       // Pickup points are always visible on the minimap; the live route and the
       // next pickup are emphasised on top of them.
       const info = getRoutesInfo();
@@ -4476,11 +4487,8 @@
         ctx.stroke();
         // Draw stop number label for route stops
         if (isActiveRouteStop) {
-          ctx.fillStyle = '#101713';
-          ctx.font = 'bold 8px system-ui, sans-serif';
-          ctx.textAlign = 'center';
           const stopNum = active.stops.findIndex(s => s.index === i) + 1;
-          ctx.fillText(String(stopNum), sx, sy + 3);
+          label(String(stopNum), sx, sy, 'bold 8px system-ui, sans-serif', '#101713', 3);
         }
       }
 
@@ -4495,7 +4503,7 @@
         if (offScreen) {
           const px = Math.max(10, Math.min(cw - 10, nx));
           const py = Math.max(10, Math.min(chh - 10, ny));
-          const ang = Math.atan2(ny - my(busState.z), nx - mx(busState.x));
+          const ang = Math.atan2(ny - my(busState.z), nx - mx(busState.x)) - (mapRot || 0);
           ctx.save();
           ctx.translate(px, py);
           ctx.rotate(ang);
@@ -4545,10 +4553,7 @@
         ctx.globalAlpha = 1.0;
         // Label: next stop name
         if (routeMode && active) {
-          ctx.fillStyle = '#fff';
-          ctx.font = 'bold 9px system-ui, sans-serif';
-          ctx.textAlign = 'center';
-          ctx.fillText(next.name, nx, ny - 8);
+          label(next.name, nx, ny, 'bold 9px system-ui, sans-serif', '#fff', -8);
         }
         ctx.restore();
       }

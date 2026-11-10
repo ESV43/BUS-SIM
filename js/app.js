@@ -4007,6 +4007,8 @@
   let miniZoom = 2.2;
   let viewLeft = -GW / 2, viewTop = -GH / 2;
   let viewW = GW / miniZoom, viewH = GH / miniZoom;
+  // Heading-up minimap: the whole crop spins so the bus always faces the top.
+  let miniAngle = 0, miniAngleReady = false;
   let miniFocusX = 0, miniFocusZ = 0, miniViewReady = false;
   let lastRawX = 0, lastRawZ = 0, miniDirX = 0, miniDirZ = 0;
   const miniTrail = [];
@@ -4168,8 +4170,27 @@
     const lookAhead = Math.min(120, speedAbs * 7) * 0.6;
     miniFocusX += (fxp + miniDirX * lookAhead - miniFocusX) * 0.25;
     miniFocusZ += (fzp + miniDirZ * lookAhead - miniFocusZ) * 0.25;
-    viewLeft = clamp(miniFocusX - viewW / 2, -GW / 2, GW / 2 - viewW);
-    viewTop = clamp(miniFocusZ - viewH / 2, -GH / 2, GH / 2 - viewH);
+    // Spin the crop so the bus's facing direction points at the top of the
+    // panel. Live heading is used while driving; movement bearing is the
+    // fallback when the camera is being flown without a vehicle.
+    let wantAngle = miniAngle;
+    if (live && typeof live.heading === 'number') wantAngle = live.heading + Math.PI;
+    else if (miniDirX || miniDirZ) wantAngle = Math.atan2(miniDirX, miniDirZ) + Math.PI;
+    if (!miniAngleReady) { miniAngle = wantAngle; miniAngleReady = true; }
+    else {
+      const da = Math.atan2(Math.sin(wantAngle - miniAngle), Math.cos(wantAngle - miniAngle));
+      miniAngle += da * 0.18;
+    }
+
+    // Keep the rotated crop inside the baked map: the corners of a turned
+    // square reach further than the axis-aligned window does.
+    const turnSpread = Math.abs(Math.cos(miniAngle)) + Math.abs(Math.sin(miniAngle));
+    const reachX = Math.min(viewW * 0.5 * turnSpread, GW * 0.5);
+    const reachZ = Math.min(viewH * 0.5 * turnSpread, GH * 0.5);
+    const focusClampX = clamp(miniFocusX, -GW / 2 + reachX, GW / 2 - reachX);
+    const focusClampZ = clamp(miniFocusZ, -GH / 2 + reachZ, GH / 2 - reachZ);
+    viewLeft = focusClampX - viewW / 2;
+    viewTop = focusClampZ - viewH / 2;
 
     // Breadcrumb trail of where the bus has actually been.
     if (live) {
@@ -4180,18 +4201,33 @@
       }
     }
 
+    const focusX = viewLeft + viewW * 0.5;
+    const focusZ = viewTop + viewH * 0.5;
+    const halfW = MINI_W * 0.5, halfH = MINI_H * 0.5;
+    const cosA = Math.cos(miniAngle), sinA = Math.sin(miniAngle);
+
     mctx.clearRect(0, 0, MINI_W, MINI_H);
     mctx.fillStyle = '#0e1a13';
     mctx.fillRect(0, 0, MINI_W, MINI_H);
-    mctx.drawImage(
-      miniBase,
-      (viewLeft + GW / 2) / GW * MINI_W, (viewTop + GH / 2) / GH * MINI_H,
-      viewW / GW * MINI_W, viewH / GH * MINI_H,
-      0, 0, MINI_W, MINI_H
-    );
+
+    // Everything world-anchored is painted through one rotated transform, so the
+    // base map, trail, stop icons and route all stay locked together.
+    mctx.save();
+    mctx.beginPath();
+    mctx.rect(0, 0, MINI_W, MINI_H);
+    mctx.clip();
+    mctx.translate(halfW, halfH);
+    mctx.rotate(miniAngle);
+    mctx.scale(miniZoom, miniZoom);
+    mctx.translate(-(focusX + GW / 2) / GW * MINI_W, -(focusZ + GH / 2) / GH * MINI_H);
+    mctx.drawImage(miniBase, 0, 0);
+    mctx.restore();
 
     if (miniTrail.length > 1) {
       mctx.save();
+      mctx.translate(halfW, halfH);
+      mctx.rotate(miniAngle);
+      mctx.translate(-halfW, -halfH);
       mctx.lineCap = 'round';
       mctx.lineJoin = 'round';
       mctx.strokeStyle = '#ffd166';
@@ -4209,7 +4245,11 @@
       mctx.restore();
     }
 
-    for (const fn of minimapHooks) fn(mctx, viewX, viewY);
+    mctx.save();
+    mctx.translate(halfW, halfH);
+    mctx.rotate(miniAngle);
+    mctx.translate(-halfW, -halfH);
+    for (const fn of minimapHooks) fn(mctx, viewX, viewY, miniAngle);
 
     if (!state.cameraExternal) {
       const tx = viewX(cam.target.x), ty = viewY(cam.target.z);
@@ -4223,6 +4263,53 @@
       mctx.lineWidth = 1.5;
       mctx.beginPath(); mctx.arc(tx, ty, 4.2, 0, Math.PI * 2); mctx.stroke();
     }
+    mctx.restore();
+
+    // Bus marker: the map spins around it, so it always points straight up.
+    const bx = halfW + ((fxp - focusX) * cosA - (fzp - focusZ) * sinA) * (MINI_W / viewW);
+    const by = halfH + ((fxp - focusX) * sinA + (fzp - focusZ) * cosA) * (MINI_H / viewH);
+    mctx.save();
+    mctx.translate(bx, by);
+    mctx.beginPath();
+    mctx.arc(0, 0, 11, 0, Math.PI * 2);
+    mctx.fillStyle = 'rgba(255,209,102,0.18)';
+    mctx.fill();
+    mctx.beginPath();
+    mctx.moveTo(0, -9);
+    mctx.lineTo(6.2, 7);
+    mctx.lineTo(0, 3.4);
+    mctx.lineTo(-6.2, 7);
+    mctx.closePath();
+    mctx.fillStyle = '#ffd166';
+    mctx.strokeStyle = '#101713';
+    mctx.lineWidth = 1.4;
+    mctx.fill();
+    mctx.stroke();
+    mctx.restore();
+
+    // Compass: how far the map is turned away from north-up.
+    const nx = MINI_W - 19, ny = 19;
+    const ndx = Math.sin(miniAngle), ndy = -Math.cos(miniAngle);
+    mctx.save();
+    mctx.beginPath();
+    mctx.arc(nx, ny, 11, 0, Math.PI * 2);
+    mctx.fillStyle = 'rgba(9,16,12,0.72)';
+    mctx.strokeStyle = 'rgba(244,239,227,0.5)';
+    mctx.lineWidth = 1;
+    mctx.fill();
+    mctx.stroke();
+    mctx.beginPath();
+    mctx.moveTo(nx + ndx * 7, ny + ndy * 7);
+    mctx.lineTo(nx + ndx * -2 - ndy * 3.4, ny + ndy * -2 + ndx * 3.4);
+    mctx.lineTo(nx + ndx * -2 + ndy * 3.4, ny + ndy * -2 - ndx * 3.4);
+    mctx.closePath();
+    mctx.fillStyle = '#ff6b57';
+    mctx.fill();
+    mctx.fillStyle = 'rgba(244,239,227,0.9)';
+    mctx.font = 'bold 7px system-ui, sans-serif';
+    mctx.textAlign = 'center';
+    mctx.fillText('N', nx, ny + 3.2 + ndy * -2);
+    mctx.restore();
   }
 
   let miniDrag = false;
@@ -4231,7 +4318,13 @@
     const r = mini.getBoundingClientRect();
     const px = clamp((e.clientX - r.left) / r.width, 0, 1);
     const py = clamp((e.clientY - r.top) / r.height, 0, 1);
-    const x = viewLeft + px * viewW, z = viewTop + py * viewH;
+    // Undo the heading-up rotation so a tap still lands on the world point
+    // under the finger.
+    const sx = px * MINI_W - MINI_W / 2, sy = py * MINI_H - MINI_H / 2;
+    const cosB = Math.cos(-miniAngle), sinB = Math.sin(-miniAngle);
+    const rx = sx * cosB - sy * sinB, ry = sx * sinB + sy * cosB;
+    const x = viewLeft + viewW / 2 + rx / (MINI_W / viewW);
+    const z = viewTop + viewH / 2 + ry / (MINI_H / viewH);
     cancelFly();
     desired.target.set(clamp(x, -GW / 2 + 50, GW / 2 - 50), heightAt(x, z) + 12, clamp(z, -GH / 2 + 50, GH / 2 - 50));
   }

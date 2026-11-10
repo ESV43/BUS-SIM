@@ -136,14 +136,15 @@ body.labels-off .label{display:none}
 .actions .btn{flex:1;text-align:center;padding:8px 6px;font-size:10.5px}
 
 /* ---------- bottom UI ---------- */
-#bottom-left{position:fixed;z-index:8;left:24px;bottom:22px;display:flex;flex-direction:column;gap:8px;width:206px}
+#bottom-left{position:fixed;z-index:8;left:24px;bottom:22px;display:flex;flex-direction:column;gap:8px;width:250px}
 .readout{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:9px;font-size:9.5px;letter-spacing:.05em;
   color:#d8d3c5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .read-dot{width:5px;height:5px;border-radius:50%;background:var(--accent-2);flex:0 0 auto;box-shadow:0 0 8px rgba(169,194,162,.7)}
 #readout-text{overflow:hidden;text-overflow:ellipsis}
-.minimap-card{position:relative;padding:6px;border-radius:11px;overflow:hidden;line-height:0}
-#minimap{display:block;width:194px;height:179px;border-radius:7px;background:#15201a;cursor:crosshair;
-  image-rendering:auto;box-shadow:inset 0 0 0 1px rgba(255,255,255,.08)}
+.minimap-card{position:relative;padding:6px;border-radius:11px;overflow:hidden;line-height:0;
+  box-shadow:0 10px 30px rgba(0,0,0,.55),0 0 0 1px rgba(255,255,255,.10)}
+#minimap{display:block;width:238px;height:220px;border-radius:8px;background:#0e1a13;cursor:crosshair;
+  image-rendering:auto;box-shadow:inset 0 0 0 1px rgba(255,255,255,.14),inset 0 0 26px rgba(0,0,0,.55)}
 .mini-n{position:absolute;top:12px;left:14px;font-size:9px;font-weight:700;letter-spacing:.08em;color:#fff;
   text-shadow:0 1px 4px #000;background:rgba(0,0,0,.35);border-radius:4px;padding:2px 5px;line-height:1.3}
 .mini-tag{position:absolute;right:13px;bottom:11px;font-size:7.5px;font-weight:700;letter-spacing:.18em;color:rgba(255,255,255,.8);
@@ -232,8 +233,8 @@ body.labels-off .label{display:none}
   .view-grid{grid-template-columns:1fr 1fr;gap:5px}
   .btn{padding:7px 7px;font-size:10px}
   #info{top:auto;bottom:96px;right:14px;width:206px;max-height:46vh;overflow:auto}
-  #bottom-left{left:14px;bottom:14px;width:154px}
-  #minimap{width:142px;height:131px}
+  #bottom-left{left:14px;bottom:14px;width:182px}
+  #minimap{width:168px;height:155px}
   .minimap-card{padding:5px}
   #bottom-center{bottom:16px}
   #hint{display:none}
@@ -401,7 +402,9 @@ body.shuttle-active #labels{opacity:.32}
 @media (max-width:1080px){
   .shuttle-hud{left:16px;right:16px;grid-template-columns:1fr 1fr}
   .sh-center{grid-column:1 / -1;order:-1}
-  body.shuttle-active #bottom-left{display:none}
+  /* Keep the minimap on screen while driving, docked just above the HUD. */
+  body.shuttle-active #bottom-left{display:flex;left:16px;bottom:172px}
+  body.shuttle-active #bottom-left .readout{display:none}
   .mp-board{display:none}
 }
 
@@ -652,7 +655,13 @@ body.shuttle-active .title-card{opacity:0;pointer-events:none;transition:opacity
 @media (pointer:coarse){
   .panel{backdrop-filter:none;-webkit-backdrop-filter:none;box-shadow:0 9px 26px rgba(0,0,0,.38)}
   #vignette{mix-blend-mode:normal;opacity:.72}
-  #bottom-left{display:none}
+  body:not(.shuttle-active) #bottom-left{display:none}
+  /* Touch players still get a compact heading-up minimap above the pedals. */
+  body.shuttle-active #bottom-left{display:flex;left:max(10px,env(safe-area-inset-left,0px));
+    bottom:calc(96px + env(safe-area-inset-bottom,0px));width:156px}
+  body.shuttle-active #bottom-left .readout{display:none}
+  body.shuttle-active #minimap{width:146px;height:135px}
+  body.shuttle-active .minimap-card{box-shadow:0 6px 18px rgba(0,0,0,.5),0 0 0 1px rgba(255,255,255,.10)}
   body.shuttle-active #labels{display:none}
   .touch-btn{width:64px;height:64px;backdrop-filter:none;-webkit-backdrop-filter:none;
     -webkit-tap-highlight-color:transparent;-webkit-user-select:none;user-select:none}
