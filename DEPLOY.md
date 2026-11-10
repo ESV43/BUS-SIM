@@ -14,6 +14,8 @@ Deploy from the repository root with `vercel --prod`. `vercel.json` serves the r
 
 The standalone `multiplayer-server.js` process is not started by a static Vercel deployment. The game uses PeerJS signaling and direct WebRTC data connections on Vercel; it does not try a dead `/ws` route first. Vercel Functions now support WebSockets, but that requires a Function endpoint, and rooms that span Function instances need shared room state. This repository does not include that backend. See Vercel's [WebSocket announcement](https://vercel.com/changelog/websocket-support-is-now-generally-available).
 
+Rooms negotiate WebRTC with STUN plus the public Open Relay Project TURN server, so players on networks that block direct peer traffic can still connect. To use your own relay, set `window.IISER_ICE_SERVERS = [{ urls: 'turn:…', username: '…', credential: '…' }]` before `js/shuttle-game.js` loads.
+
 To use a separately hosted WebSocket server, set `window.IISER_MULTIPLAYER_WS` to its `wss://…/ws` URL before `js/shuttle-game.js` loads. Vercel's [static build settings](https://vercel.com/docs/builds/configure-a-build) are described above.
 
 ## Local multiplayer server

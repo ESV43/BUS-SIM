@@ -850,7 +850,8 @@
   buildBusStopShelters();
 
   // --- 4A. NEXT-STOP WAYFINDING ARROW ---
-  // A floating gold chevron above the bus that points at the next stop.
+  // A floating gold chevron ahead of the bus, at cab height, that points along
+  // the route so it stays readable from the cockpit camera too.
   const navArrow = new T.Group();
   {
     const arrowMat = new T.MeshBasicMaterial({
@@ -876,13 +877,27 @@
     const dx = st.x - busState.x, dz = st.z - busState.z;
     const d = Math.hypot(dx, dz);
     if (d < 5.5) { navArrow.visible = false; return; }
+
+    // Routes run forward: aim at the next stop while it is ahead of the bus, but
+    // if it has already been passed keep the chevron pointing the way the bus is
+    // travelling so it never swings around to face backwards.
+    const fx = Math.sin(busState.heading), fz = Math.cos(busState.heading);
+    const ahead = (dx * fx + dz * fz) / Math.max(d, 0.001);
+    const dirX = ahead > 0.1 ? dx / d : fx;
+    const dirZ = ahead > 0.1 ? dz / d : fz;
+
+    // Float it ahead of the bus at roughly cab-eye height, so the cockpit camera
+    // sees it through the windscreen instead of it sitting above the roof.
+    const lead = clamp(d * 0.55, 7.5, 14);
+    const ax = busState.x + dirX * lead;
+    const az = busState.z + dirZ * lead;
     navArrow.visible = true;
     navArrow.position.set(
-      busState.x,
-      getSurfaceHeight(busState.x, busState.z) + 4.25 + Math.sin(t * 2.6) * 0.14,
-      busState.z
+      ax,
+      getSurfaceHeight(ax, az) + 2.75 + Math.sin(t * 2.6) * 0.14,
+      az
     );
-    navArrow.rotation.y = Math.atan2(dx, dz);
+    navArrow.rotation.y = Math.atan2(dirX, dirZ);
   }
 
   // --- 4B. SPATIAL-HASHED IMPERMEABLE SOLID-BODY COLLISION ENGINE ---
@@ -3622,10 +3637,28 @@
     };
   }
 
+  // ICE servers used for every PeerJS room. Restrictive networks (campus Wi-Fi,
+  // hotel/office firewalls) block UDP peer traffic, so a TURN relay is needed for
+  // the data channel to open. Override with window.IISER_ICE_SERVERS if you run
+  // your own coturn/relay instead of the public one.
+  function mpIceServers() {
+    if (Array.isArray(window.IISER_ICE_SERVERS) && window.IISER_ICE_SERVERS.length) {
+      return window.IISER_ICE_SERVERS;
+    }
+    return [
+      { urls: 'stun:stun.l.google.com:19302' },
+      { urls: 'stun:global.stun.twilio.com:3478' },
+      { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
+      { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
+      { urls: 'turns:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' }
+    ];
+  }
+
   function attachPeer(room, role) {
     if (!mp.enabled || star.peer) return;
     star.settled = false;
     const hostId = 'iiser-drive-' + room;
+    const peerOptions = { debug: 0, config: { iceServers: mpIceServers() } };
     const showError = (message) => {
       if (star.joinTimer) clearTimeout(star.joinTimer);
       star.joinTimer = 0;
@@ -3637,7 +3670,7 @@
 
     const claimHost = () => {
       let peer;
-      try { peer = new window.Peer(hostId, { debug: 0 }); }
+      try { peer = new window.Peer(hostId, peerOptions); }
       catch (_) { return showError('Room could not be created. Check your connection and try again.'); }
       star.peer = peer;
       star.role = 'host';
@@ -3710,7 +3743,7 @@
 
     const starGuestConnect = () => {
       let peer;
-      try { peer = new window.Peer(undefined, { debug: 0 }); }
+      try { peer = new window.Peer(undefined, peerOptions); }
       catch (_) { return showError('Could not join the room. Check your internet connection and try again.'); }
       star.peer = peer;
       star.role = 'guest';
@@ -3772,9 +3805,18 @@
         star.joinTimer = setTimeout(() => {
           star.joinTimer = 0;
           if (!mp.enabled || star.peer !== peer || connected) return;
-          showError('The host was found, but the direct connection timed out. Keep the host open and try again; some networks require a relay.');
+          // Direct ICE never completed: this network is likely blocking peer traffic.
+          // Reconnect so the next attempt can settle on a TURN relay candidate
+          // (relaying is slower than a direct link).
+          if (joinAttempts < 3) {
+            mp.status = 'Room ' + mp.room + ' · direct link blocked, retrying through relay…';
+            mpStatusUpdate();
+            try { conn.close(); } catch (_) {} // close handler retries the connection
+            return;
+          }
+          showError('The host was found, but the direct connection timed out. Keep the host open and try again; this network blocks peer traffic and the relay could not be reached.');
           try { conn.close(); } catch (_) {}
-        }, 12000);
+        }, 20000);
       };
 
       peer.on('open', () => {
