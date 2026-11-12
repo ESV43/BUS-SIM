@@ -178,9 +178,10 @@
   scoreEl.textContent = 'Score: 0';
   document.body.appendChild(scoreEl);
 
-  // Simple game loop hook
+  // Simple game loop hook — only runs when the player is actually in game mode.
   const originalAnimate = () => {};
   let last = performance.now();
+  let collectScanAt = 0;
   function gameTick() {
     requestAnimationFrame(gameTick);
     const now = performance.now();
@@ -194,7 +195,7 @@
     if (keys['KeyS'] || keys['ArrowDown']) moveVec.z += 1;
     if (keys['KeyA'] || keys['ArrowLeft']) moveVec.x -= 1;
     if (keys['KeyD'] || keys['ArrowRight']) moveVec.x += 1;
-    moveVec.normalize();
+    if (moveVec.lengthSq() > 0) moveVec.normalize();
 
     const dir = new T.Vector3();
     controls.getDirection(dir);
@@ -220,15 +221,19 @@
       onGround = true;
     }
 
-    // simple collect
-    assetGroup.children.forEach(child => {
-      if (!child.userData.collected && child.position.distanceTo(pos) < 3) {
-        child.userData.collected = true;
-        scene.userData.score += 10;
-        scoreEl.textContent = 'Score: ' + scene.userData.score;
-        child.visible = false;
-      }
-    });
+    // simple collect — throttled to ~8 Hz; the player cannot collect faster
+    // than that and the scan is O(n) over every prop in the scene.
+    if (now - collectScanAt > 125) {
+      collectScanAt = now;
+      assetGroup.children.forEach(child => {
+        if (!child.userData.collected && child.position.distanceTo(pos) < 3) {
+          child.userData.collected = true;
+          scene.userData.score += 10;
+          scoreEl.textContent = 'Score: ' + scene.userData.score;
+          child.visible = false;
+        }
+      });
+    }
   }
   requestAnimationFrame(gameTick);
 

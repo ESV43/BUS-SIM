@@ -420,8 +420,9 @@
   }
 
   // --- 2. RENDERER, SCENE, LIGHTING & UNREAL FX ---
-  let treesEnabled = true;
-  try { treesEnabled = localStorage.getItem('iiser.trees') !== 'off'; } catch (_) {}
+  // Default trees off for a smooth start; users can toggle them on.
+  let treesEnabled = false;
+  try { treesEnabled = localStorage.getItem('iiser.trees') === 'on'; } catch (_) {}
   const state = {
     labels: 'key',
     trees: treesEnabled,
@@ -456,31 +457,34 @@
   let qualityMode = 'auto';
   try { qualityMode = localStorage.getItem(QUALITY_KEY) || 'auto'; } catch (_) {}
   if (!/^(auto|low|medium|high)$/.test(qualityMode)) qualityMode = 'auto';
-  const perf = { scale: mobileDevice ? 0.60 : 0.72, ema: 1 / 60, lastAdjust: 0 };
+  const perf = { scale: mobileDevice ? 0.50 : 0.72, ema: 1 / 60, lastAdjust: 0 };
   function shadowResolutionFor(mode) {
     if (mode === 'high') return 2048;
     if (mode === 'medium' && !isSoftwareGL && !mobileDevice && window.innerWidth >= 900) return 1024;
+    if (mode === 'low' || mobileDevice) return 256;
     return 512;
   }
   function basePixelRatio() {
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    if (qualityMode === 'low') return mobileDevice ? 0.72 : 0.82;
-    if (qualityMode === 'medium') return Math.min(dpr, mobileDevice ? 1.25 : 1.5);
-    if (qualityMode === 'high') return dpr;
-    return Math.min(dpr, mobileDevice ? 1.25 : 1.5);
+    if (qualityMode === 'low') return mobileDevice ? 0.55 : 0.82;
+    if (qualityMode === 'medium') return Math.min(dpr, mobileDevice ? 0.9 : 1.5);
+    if (qualityMode === 'high') return mobileDevice ? Math.min(dpr, 1.5) : dpr;
+    return Math.min(dpr, mobileDevice ? 0.9 : 1.5);
   }
   function effectivePixelRatio() {
     const base = isSoftwareGL ? 1 : basePixelRatio();
-    return Math.max(mobileDevice ? 0.55 : 0.62, base * (qualityMode === 'auto' ? perf.scale : 1));
+    return Math.max(mobileDevice ? 0.40 : 0.62, base * (qualityMode === 'auto' ? perf.scale : 1));
   }
   function setQuality(mode) {
     if (!/^(auto|low|medium|high)$/.test(mode)) mode = 'auto';
     qualityMode = mode;
     try { localStorage.setItem(QUALITY_KEY, mode); } catch (_) {}
-    perf.scale = mode === 'auto' ? (mobileDevice ? 0.60 : 0.72) : 1;
+    perf.scale = mode === 'auto' ? (mobileDevice ? 0.50 : 0.72) : 1;
     renderer.setPixelRatio(effectivePixelRatio());
     if (unrealFXRef) unrealFXRef.resize();
-    renderer.shadowMap.enabled = mode !== 'low' && !(mobileDevice && mode === 'auto');
+    // Mobile disables shadows at all quality levels except High (which the user
+    // has explicitly chosen). Shadow map fill is a large fraction of mobile GPU time.
+    renderer.shadowMap.enabled = mode !== 'low' && !mobileDevice && !(mobileDevice && mode !== 'high');
     const shadowResolution = shadowResolutionFor(mode);
     if (sunLight.shadow.mapSize.width !== shadowResolution) {
       sunLight.shadow.mapSize.set(shadowResolution, shadowResolution);
@@ -489,23 +493,27 @@
     renderer.shadowMap.needsUpdate = true;
     // The bloom/depth composite costs several full-screen passes. Keep Auto and
     // Medium responsive; reserve it for users who explicitly choose High.
-    if (unrealFXRef) unrealFXRef.setPostEnabled(mode === 'high');
+    // Mobile gets no bloom at any setting — the separable blur passes are too
+    // expensive on mobile GPUs and the visual gain is small on a phone screen.
+    if (unrealFXRef) unrealFXRef.setPostEnabled(mode === 'high' && !mobileDevice);
     window.dispatchEvent(new CustomEvent('iiser:quality', { detail: mode }));
   }
+  // Start conservatively for a smooth first impression; Auto quality will
+  // ramp back up if the frame rate stays healthy.
+  perf.scale = 0.5;
   renderer.setPixelRatio(effectivePixelRatio());
-  const qualityTier = (isSoftwareGL || mobileDevice || window.innerWidth < 900) ? 'low' : 'mid';
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.outputEncoding = T.sRGBEncoding;
   renderer.toneMapping = T.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.02;
-  renderer.shadowMap.enabled = qualityMode !== 'low' && !(mobileDevice && qualityMode === 'auto');
+  renderer.shadowMap.enabled = qualityMode !== 'low' && !mobileDevice && !(mobileDevice && qualityMode === 'auto');
   renderer.shadowMap.type = T.PCFShadowMap; // cheaper than PCFSoft, visually comparable at campus scale
   host.appendChild(renderer.domElement);
 
   const scene = new T.Scene();
   scene.fog = new T.FogExp2(0xc9e0ec, 0.00018);
   const camera = new T.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.65, 15000);
-  const maxAniso = Math.min(mobileDevice ? 3 : 16, renderer.capabilities.getMaxAnisotropy());
+  const maxAniso = Math.min(mobileDevice ? 2 : 16, renderer.capabilities.getMaxAnisotropy());
 
   const hemi = new T.HemisphereLight(0xa8d0f8, 0x4a5a3c, 0.72);
   scene.add(hemi);
@@ -3978,8 +3986,14 @@
   window.CampusDriveHowToOpen = openHowTo;
 
   const projTmp = new T.Vector3();
+  let labelAt = 0;
   function updateLabels() {
     if (state.labels === 'off') return;
+    const nowMs = performance.now();
+    // On mobile the CPU is already busy with touch handling + physics; labels
+    // update at most twice a second so the raycast-heavy path stays cheap.
+    if (nowMs - labelAt < (mobileDevice ? 500 : 33)) return;
+    labelAt = nowMs;
     const w = window.innerWidth, h = window.innerHeight;
     const placedBoxes = [];
     // Sort closest/major first so key landmarks always win screen space cleanly without messy overlap!
@@ -4432,14 +4446,14 @@
         fpsBadge.textContent = Math.round(1 / Math.max(perf.ema, 1e-4)) + ' FPS · ' + effectivePixelRatio().toFixed(2) + 'x';
       }
     }
-    if (!navOpen && qualityMode === 'auto' && elapsed - perf.lastAdjust > 1.25) {
+    if (!navOpen && qualityMode === 'auto' && elapsed - perf.lastAdjust > 0.75) {
       perf.lastAdjust = elapsed;
       const fps = 1 / Math.max(perf.ema, 1e-4);
-      if (fps < 48 && perf.scale > 0.45) {
-        perf.scale = Math.max(0.45, perf.scale - 0.12);
+      if (fps < 45 && perf.scale > 0.40) {
+        perf.scale = Math.max(0.40, perf.scale - 0.10);
         renderer.setPixelRatio(effectivePixelRatio());
-      } else if (fps > 58 && perf.scale < 1) {
-        perf.scale = Math.min(1, perf.scale + 0.04);
+      } else if (fps > 56 && perf.scale < 1) {
+        perf.scale = Math.min(1, perf.scale + 0.06);
         renderer.setPixelRatio(effectivePixelRatio());
       }
     }
@@ -4466,7 +4480,7 @@
       }
     }
 
-    if (waterMats.length) {
+    if (waterMats.length && !mobileDevice) {
       waterNormalTex.offset.x = (elapsed * 0.018) % 1;
       waterNormalTex.offset.y = (elapsed * 0.012) % 1;
     }

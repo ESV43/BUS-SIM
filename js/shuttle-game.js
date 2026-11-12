@@ -1180,6 +1180,70 @@
     return { hit, impact: strongestImpact };
   }
 
+  // Mass-respecting player-vs-player collision for multiplayer rooms.
+  // Each peer's OBB is built from its reported heading + the active vehicle's
+  // half-dimensions, so a coach-vs-buggy encounter respects the real size difference.
+  function peerObbsForPlayer() {
+    if (!mp.enabled || !busState.active) return [];
+    const pDef = VEHICLE_DEFS[busState.vehicle];
+    const peers = [];
+    for (const peer of mp.peers.values()) {
+      if (peer.x == null || isNaN(peer.x)) continue;
+      const pFleet = FLEET_MASS[peer.fleet] ? peer.fleet : 'transit';
+      const pHalfL = (pFleet === 'buggy') ? 1.72 : 5.05;
+      const pHalfW = (pFleet === 'buggy') ? 0.82 : 1.26;
+      peers.push({
+        kind: 'obb',
+        cx: peer.x, cz: peer.z,
+        hx: pHalfW, hz: pHalfL, yaw: peer.heading,
+        _m: FLEET_MASS[pFleet] || 7800
+      });
+    }
+    return peers;
+  }
+
+  function resolveBusVsPeers() {
+    const peerObjs = peerObbsForPlayer();
+    if (!peerObjs.length) return { hit: false, impact: 0 };
+    const mPlayer = busState.vehicle === 'buggy' ? 1150 : (FLEET_MASS[busState.fleetKey] || 7800);
+    const sinH = Math.sin(busState.heading), cosH = Math.cos(busState.heading);
+    const discOffsets = busState.vehicle === 'buggy' ? BUGGY_DISC_OFFSETS : BUS_DISC_OFFSETS;
+    const discRadius = busState.vehicle === 'buggy' ? BUGGY_DISC_RADIUS : BUS_DISC_RADIUS;
+    let hit = false, strongestImpact = 0;
+    for (let iter = 0; iter < 2; iter++) {
+      for (let pi = 0; pi < peerObjs.length; pi++) {
+        const p = peerObjs[pi];
+        if (Math.hypot(p.cx - busState.x, p.cz - busState.z) > 20) continue;
+        for (let di = 0; di < discOffsets.length; di++) {
+          const off = discOffsets[di];
+          const dx = busState.x + sinH * off;
+          const dz = busState.z + cosH * off;
+          const res = testDiscVsObstacle(dx, dz, discRadius, p);
+          if (!res) continue;
+          const mPeer = p._m || 7800;
+          const sharePlayer = mPeer / (mPlayer + mPeer);
+          const sharePeer = mPlayer / (mPlayer + mPeer);
+          busState.x += res.nx * res.pen * sharePlayer;
+          busState.z += res.nz * res.pen * sharePlayer;
+          const pvx = Math.sin(busState.heading) * busState.speed, pvz = Math.cos(busState.heading) * busState.speed;
+          const c = Math.cos(p.yaw), s = Math.sin(p.yaw);
+          const pvnx = s, pvnz = c;
+          const cvx = pvnx * 0, cvz = pvnz * 0; // peer velocity not broadcast; treat as stationary for response
+          const vn = (pvx - cvx) * res.nx + (pvz - cvz) * res.nz;
+          if (vn < 0) {
+            const e = 0.10;
+            const j = -(1 + e) * vn * (mPlayer * mPeer) / (mPlayer + mPeer);
+            const nvx = pvx + (j / mPlayer) * res.nx, nvz = pvz + (j / mPlayer) * res.nz;
+            busState.speed = nvx * Math.sin(busState.heading) + nvz * Math.cos(busState.heading);
+            strongestImpact = Math.max(strongestImpact, -vn);
+            hit = true;
+          }
+        }
+      }
+    }
+    return { hit, impact: strongestImpact };
+  }
+
   // --- 5. REAL .GLB BUS LOADER, FIXED WHEEL RIGGING, 8-PLAYER LIVERIES & 3D COCKPIT ---
   const FLEET_CONFIGS = {
     transit: {
@@ -3041,10 +3105,18 @@
 
     const dynObs = [];
     if (gateState.open < 0.55 && gateBoomObstacle) dynObs.push(gateBoomObstacle);
+    // Peer vehicles are resolved separately through resolveBusVsPeers (mass-
+    // respecting impulse response) so the spatial hash stays static-only and
+    // the solver does not try to push remote buses through buildings.
     const preImpact = Math.abs(busState.speed);
     const res = resolveBusSolidCollisions(busState, dynObs);
     const carHit = resolveBusVsAiCars();
-    const impactNow = Math.max(res.hit ? res.impactSpeed : 0, carHit.hit ? carHit.impact : 0);
+    const peerHit = resolveBusVsPeers();
+    const impactNow = Math.max(
+      res.hit ? res.impactSpeed : 0,
+      carHit.hit ? carHit.impact : 0,
+      peerHit.hit ? peerHit.impact : 0
+    );
     if (impactNow > 2.2) playImpactThud(impactNow);
     // Collision fines remain separate from the optional vehicle health simulation.
     if (impactNow > 2.6) {
