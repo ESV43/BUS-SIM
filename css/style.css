@@ -279,6 +279,22 @@ body.shuttle-active #labels{opacity:.32}
 .shuttle-hud{position:fixed;z-index:20;left:242px;right:24px;bottom:18px;
   display:grid;grid-template-columns:232px 1fr 278px;gap:11px;align-items:stretch}
 .shuttle-hud.hidden{display:none}
+/* Minimised control panel: speed + next stop only */
+.sh-hud-min{position:absolute;top:-9px;left:-9px;width:24px;height:24px;padding:0;border-radius:50%;
+  display:flex;align-items:center;justify-content:center;cursor:pointer;z-index:2;
+  background:rgba(12,20,16,.92);border:1px solid var(--line);color:var(--muted);
+  font:inherit;font-size:14px;line-height:1}
+.sh-hud-min:hover{color:#fff;border-color:rgba(59,232,176,.55);background:rgba(59,232,176,.2)}
+.shuttle-hud.min{grid-template-columns:auto 1fr}
+.shuttle-hud.min .sh-right{display:none}
+.shuttle-hud.min .sh-left{grid-column:1;grid-row:1;order:0;padding:7px 12px;flex-direction:row;align-items:center;gap:10px}
+.shuttle-hud.min .sh-left>:not(.sh-speed-row){display:none}
+.shuttle-hud.min .sh-speed{font-size:24px}
+.shuttle-hud.min .sh-center{grid-column:2;grid-row:1;order:1;padding:7px 12px;flex-direction:row;align-items:center;justify-content:flex-start}
+.shuttle-hud.min .sh-center>:not(.sh-stop-row){display:none}
+.shuttle-hud.min .sh-stop-row{flex:1;gap:10px;align-items:center}
+.shuttle-hud.min .sh-stop-name{font-size:13px}
+.shuttle-hud.min .sh-stop-dist{font-size:12px}
 .sh-left,.sh-center,.sh-right{padding:11px 14px;display:flex;flex-direction:column;justify-content:space-between}
 .sh-speed-row{display:flex;align-items:baseline;justify-content:space-between;gap:8px}
 .sh-speed-wrap{display:flex;align-items:baseline;gap:7px}
@@ -488,6 +504,7 @@ body.shuttle-active .title-card{opacity:0;pointer-events:none;transition:opacity
   .shuttle-hud{left:10px;right:10px;bottom:10px;gap:6px}
   .sh-left,.sh-center,.sh-right{padding:8px 10px}
   .sh-speed{font-size:28px}
+  .sh-hud-min{width:32px;height:32px;top:-12px;left:-4px;font-size:16px}
   .sh-actions{grid-template-columns:repeat(5,minmax(0,1fr))}
   .mode-strip{top:10px;left:16px;right:16px;bottom:auto;transform:none;max-width:none}
   .cam-strip{top:50px;left:16px;right:16px;bottom:auto;transform:none;max-width:none}

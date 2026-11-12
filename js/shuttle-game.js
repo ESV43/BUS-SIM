@@ -2446,6 +2446,20 @@
           '<button class="btn" type="button" id="sh-audio">Sound on</button>' +
         '</div>' +
       '</div>';
+    // Collapse the control panel to a slim speed + next-stop bar.
+    const hudToggle = makeEl('button', 'sh-hud-min', '\u2013');
+    hudToggle.type = 'button';
+    const labelHudToggle = () => {
+      const min = hud.classList.contains('min');
+      hudToggle.textContent = min ? '+' : '\u2013';
+      const label = min ? 'Expand control panel' : 'Minimise control panel';
+      hudToggle.title = label;
+      hudToggle.setAttribute('aria-label', label);
+      hudToggle.setAttribute('aria-expanded', String(!min));
+    };
+    hudToggle.addEventListener('click', () => { hud.classList.toggle('min'); labelHudToggle(); });
+    labelHudToggle();
+    hud.appendChild(hudToggle);
     document.body.appendChild(hud);
 
     const mpBoard = makeEl('div', 'mp-board panel hidden');
@@ -3406,7 +3420,8 @@
       } else if (mp.transport === 'looking') {
         transportLabel = ' · checking for host';
       } else if (mp.transport === 'connecting') {
-        transportLabel = ' · connecting to host';
+        transportLabel = ' · connecting to host' +
+          (star.joinAttempt > 1 ? ' (try ' + star.joinAttempt + '/' + star.joinTries + ')' : '');
       } else if (mp.transport === 'pending') {
         transportLabel = mp.role === 'host' ? ' · creating room' : ' · joining room';
       }
@@ -3571,7 +3586,7 @@
   // silently create a second room when a code is mistyped or the host is absent.
   const star = {
     peer: null, role: null, hostConn: null, guests: new Map(), guestState: new Map(),
-    settled: false, joinTimer: 0
+    settled: false, joinTimer: 0, joinAttempt: 0, joinTries: 3
   };
 
   function loadPeerJs(cb) {
@@ -3674,7 +3689,16 @@
       catch (_) { return showError('Room could not be created. Check your connection and try again.'); }
       star.peer = peer;
       star.role = 'host';
+      // If the public room service cannot be reached, the host would otherwise sit
+      // on “creating room…” forever, so give up with a readable message instead.
+      const openTimer = setTimeout(() => {
+        if (!mp.enabled || star.peer !== peer || star.settled || peer.open) return;
+        try { peer.destroy(); } catch (_) {}
+        star.peer = null;
+        showError('Could not reach the room service. Check your internet connection and try again.');
+      }, 15000);
       peer.on('open', () => {
+        clearTimeout(openTimer);
         if (!mp.enabled) { try { peer.destroy(); } catch (_) {} star.peer = null; return; }
         star.settled = true;
         mp.transport = 'peer';
@@ -3730,6 +3754,7 @@
         });
       });
       peer.on('error', (err) => {
+        clearTimeout(openTimer);
         const type = err && err.type;
         if (type === 'unavailable-id' && star.peer === peer) {
           try { peer.destroy(); } catch (_) {}
@@ -3771,6 +3796,8 @@
       const connectToHost = () => {
         if (!mp.enabled || star.peer !== peer || connected || mp.transport === 'error') return;
         joinAttempts++;
+        star.joinAttempt = joinAttempts;
+        let timedOut = false;
         mp.transport = 'connecting';
         let conn;
         try { conn = peer.connect(hostId, { reliable: true, serialization: 'json' }); }
@@ -3780,6 +3807,7 @@
         mpStatusUpdate();
         conn.on('open', () => {
           connected = true;
+          star.joinAttempt = 0;
           if (star.joinTimer) clearTimeout(star.joinTimer);
           star.joinTimer = 0;
           if (retryTimer) clearTimeout(retryTimer);
@@ -3791,6 +3819,7 @@
         });
         conn.on('data', (msg) => { try { handleMpPacket(msg); } catch (_) {} });
         conn.on('close', () => {
+          if (timedOut) return; // the timeout below owns the retry
           if (!connected) retryRoomLookup();
           else if (mp.enabled) {
             showError('Host connection closed. Ask the host to recreate the room.');
@@ -3805,25 +3834,36 @@
         star.joinTimer = setTimeout(() => {
           star.joinTimer = 0;
           if (!mp.enabled || star.peer !== peer || connected) return;
+          timedOut = true;
+          try { conn.close(); } catch (_) {}
           // Direct ICE never completed: this network is likely blocking peer traffic.
-          // Reconnect so the next attempt can settle on a TURN relay candidate
-          // (relaying is slower than a direct link).
-          if (joinAttempts < 3) {
-            mp.status = 'Room ' + mp.room + ' · direct link blocked, retrying through relay…';
+          // Retry explicitly instead of waiting on the close event, which does not
+          // fire for a channel that never opened (that left the UI on “connecting”).
+          if (joinAttempts < star.joinTries) {
+            if (retryTimer) clearTimeout(retryTimer);
+            retryTimer = setTimeout(() => { retryTimer = 0; connectToHost(); }, 600);
             mpStatusUpdate();
-            try { conn.close(); } catch (_) {} // close handler retries the connection
             return;
           }
-          showError('The host was found, but the direct connection timed out. Keep the host open and try again; this network blocks peer traffic and the relay could not be reached.');
-          try { conn.close(); } catch (_) {}
-        }, 20000);
+          showError('The host was found, but the connection timed out after ' + joinAttempts +
+            ' tries. Keep the host open, put both devices on the same Wi-Fi, or use a hotspot — this network blocks peer traffic and the relay could not be reached.');
+        }, 15000);
       };
 
+      // The public room service is a single point of failure: without this the guest
+      // would sit on “joining room…” forever when signaling cannot be reached.
+      const openTimer = setTimeout(() => {
+        if (!mp.enabled || star.peer !== peer || peer.open || star.settled) return;
+        showError('Could not reach the room service. Check your internet connection and try again.');
+        try { peer.destroy(); } catch (_) {}
+      }, 15000);
       peer.on('open', () => {
+        clearTimeout(openTimer);
         if (!mp.enabled) { try { peer.destroy(); } catch (_) {} star.peer = null; return; }
         connectToHost();
       });
       peer.on('error', (err) => {
+        clearTimeout(openTimer);
         const type = err && err.type;
         if (type === 'peer-unavailable' && star.peer === peer) {
           retryRoomLookup();
@@ -3850,7 +3890,7 @@
     try { for (const [, conn] of star.guests) { try { conn.close(); } catch (_) {} } } catch (_) {}
     if (star.hostConn) { try { star.hostConn.close(); } catch (_) {} }
     if (star.peer) { try { star.peer.destroy(); } catch (_) {} }
-    star.peer = null; star.role = null; star.hostConn = null; star.guests.clear(); star.guestState.clear(); star.settled = false;
+    star.peer = null; star.role = null; star.hostConn = null; star.guests.clear(); star.guestState.clear(); star.settled = false; star.joinAttempt = 0;
   }
 
   function connectRoomSocket(room, role) {
