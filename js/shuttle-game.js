@@ -1,7 +1,8 @@
 /* IISER Thiruvananthapuram — 3D GLB Campus & SH-45 Highway Bus Simulator
  * Real .GLB Transit/Coach/College Fleet, 7-Mode Multi-Camera System,
  * Impermeable Spatial-Hashed Multi-Disc Solid Collisions, Exterior SH-45 Highway,
- * 3 Game Modes (Free Ride, Mission, 8-Player Co-op) with BroadcastChannel + WebSocket. */
+ * 6 Game Modes (Free Ride, Mission, Time Trial, Precision Park, Buggy Safari,
+ * 8-Player Co-op) with BroadcastChannel + WebSocket. */
 (function () {
   'use strict';
 
@@ -67,12 +68,36 @@
   let gateBoomObstacle = null;
   let gateLampMat = null;
   // Main Gate position from OSM: 77.133262°E, 8.677921°N projected to scene coords.
-  // The OSM 'amenity=university' boundary centroid and road 0 starting point confirm this.
+  // The OSM barrier node sits ~4.6 m off road 0's centerline, and the asphalt ribbon
+  // is drawn symmetrically about that centerline, so anchoring the arch to the raw
+  // node put the carriageway through one pier. Snap the arch onto the centerline and
+  // take its heading from the local road tangent so the passage is centered.
   const gatePos = { x: 185.47, z: 548.84 };
   {
     const r0 = D.roads[0].pts;
-    const pA = r0[Math.min(6, r0.length - 2)], pB = r0[Math.min(10, r0.length - 1)];
-    const gateHeading = Math.atan2(pB[0] - pA[0], pB[1] - pA[1]);
+    let gx = gatePos.x, gz = gatePos.z, gTx = 0, gTz = 1, gBest = Infinity;
+    for (let i = 0; i < r0.length - 1; i++) {
+      const a = r0[i], b = r0[i + 1];
+      const dx = b[0] - a[0], dz = b[1] - a[1];
+      const l2 = dx * dx + dz * dz || 1e-6;
+      const t = Math.max(0, Math.min(1, ((gatePos.x - a[0]) * dx + (gatePos.z - a[1]) * dz) / l2));
+      const px = a[0] + dx * t, pz = a[1] + dz * t;
+      const d = Math.hypot(gatePos.x - px, gatePos.z - pz);
+      if (d < gBest) {
+        gBest = d;
+        gx = px; gz = pz;
+        const l = Math.sqrt(l2);
+        gTx = dx / l; gTz = dz / l;
+      }
+    }
+    if (gBest < 12) { gatePos.x = gx; gatePos.z = gz; }
+    else {
+      // Fallback: keep the OSM point, just orient the arch off the road direction.
+      const pA = r0[Math.min(6, r0.length - 2)], pB = r0[Math.min(10, r0.length - 1)];
+      const l = Math.hypot(pB[0] - pA[0], pB[1] - pA[1]) || 1;
+      gTx = (pB[0] - pA[0]) / l; gTz = (pB[1] - pA[1]) / l;
+    }
+    const gateHeading = Math.atan2(gTx, gTz);
     gateYaw = gateHeading;
     const gy = getSurfaceHeight(gatePos.x, gatePos.z);
 
@@ -396,8 +421,8 @@
     }
   }
 
-  // --- 4. 16 BUS STOPS (12 CAMPUS + 4 EXTERIOR SH-45 HIGHWAY) & 4 SHUTTLE ROUTES ---
-  const FLEET_MASS = { transit: 7800, coach: 11500, college: 6200 };
+  // --- 4. 21 BUS STOPS (16 CAMPUS + 5 EXTERIOR/INFILL) & 4 SHUTTLE ROUTES ---
+  const FLEET_MASS = { transit: 7800, coach: 11500, college: 6200, buggy: 1150, auto: 720 };
   const AI_CAR_MASS = 1050;
   // Cameras only issue a fine above 50 km/h, campus or highway.
   const SPEED_CAMERA_LIMIT = 50 / 3.6;
@@ -407,7 +432,10 @@
   // Positions below are approximate; the actual shelter placement uses roadInfoAt().
   const BUS_STOPS = [
     // Core campus stops along the main road network
-    { id: 'gate',         name: 'Main Gate Terminal',              x: 185.5,  z: 548.8,  heading: -1.15 },
+    // Terminal sits ~16 m inside the archway: the raw OSM gate point snapped
+    // onto the centerline right in the gate plane, which put the shelter through
+    // the west pier and the gate wall.
+    { id: 'gate',         name: 'Main Gate Terminal',              x: 196.7,  z: 536.5,  heading: -1.15 },
     { id: 'arcade',       name: 'Entrance Reception Arcade',       x: 251.5,  z: 461.0,  heading:  0.18 },
     { id: 'stadium',      name: 'Indoor Stadium & Sports Complex', x: 332.9,  z: 459.1,  heading: -0.72 },
     { id: 'anamudi',      name: 'Anamudi BS-MS Hostel',            x: 510.2,  z: 486.7,  heading:  1.31 },
@@ -418,7 +446,7 @@
     { id: 'vfr',          name: 'Visitors Forest Retreat',         x: 160.6,  z:  42.4,  heading:  3.10 },
     { id: 'health',       name: 'Health Centre & Shopping Plaza',  x: 116.5,  z: -70.5,  heading: -2.05 },
     { id: 'kathipara',    name: 'Kathipara Football Ground',       x: -131.7, z: -435.1, heading: -1.62 },
-    { id: 'quarters',     name: 'Faculty & Staff Quarters',        x: -376.7, z: -400.1, heading:  2.78 },
+    { id: 'quarters',     name: 'Faculty & Staff Quarters',        x: -466.1, z: -398.8, heading:  2.78 },
     // Exterior SH-45 Vithura–Ponmudi Highway Stops (Outside Main Gate!)
     { id: 'sh45_gate',    name: 'SH-45 Main Gate Highway Jn',      x: 145.0,  z: 556.0,  heading: -1.96 },
     { id: 'vithura_fuel', name: 'Vithura Fuel & KSRTC Stand',      x: -125.0, z: 604.5,  heading: -1.45 },
@@ -458,12 +486,12 @@
   // Stops are indexed into BUS_STOPS above; the road network is rebuilt
   // each frame from CAMPUS_DATA.roads so routes follow actual paved roads.
   const ROUTES = [
-    { id: '101', name: 'Route 101 · Main Campus Express',        stops: [0, 1, 2, 3, 4, 5, 6, 7],
-      estMinutes: 22, schedule: '06:30 – 21:30 · every 20 min' },
-    { id: '202', name: 'Route 202 · Medical, VFR & Shops',       stops: [0, 8, 9, 18, 7, 5, 19],
-      estMinutes: 18, schedule: '07:00 – 21:00 · every 25 min' },
-    { id: '303', name: 'Route 303 · Western Hilltop Climb',      stops: [7, 17, 11, 10, 8, 6, 5],
-      estMinutes: 26, schedule: '06:45 – 20:45 · every 30 min' },
+    { id: '101', name: 'Route 101 · Main Campus Express',        stops: [0, 1, 2, 3, 4, 19, 5, 16, 6, 7],
+      estMinutes: 24, schedule: '06:30 – 21:30 · every 20 min' },
+    { id: '202', name: 'Route 202 · Medical, VFR & Shops',       stops: [0, 6, 8, 9, 18, 7, 5, 4, 19],
+      estMinutes: 20, schedule: '07:00 – 21:00 · every 25 min' },
+    { id: '303', name: 'Route 303 · Western Hilltop Climb',      stops: [7, 9, 18, 10, 17, 11, 17, 10, 8, 6],
+      estMinutes: 28, schedule: '06:45 – 20:45 · every 30 min' },
     { id: '404', name: 'Route 404 · SH-45 Vithura–Ponmudi Hwy',  stops: [0, 20, 12, 13, 15, 13, 12, 14, 12, 1, 2],
       estMinutes: 34, schedule: '06:00 – 22:00 · every 40 min' }
   ];
@@ -1052,6 +1080,18 @@
   const BUS_DISC_RADIUS = 1.18;
   const BUGGY_DISC_OFFSETS = [-1.45, -0.48, 0.48, 1.45];
   const BUGGY_DISC_RADIUS = 0.72;
+  // Auto-rickshaw: short, narrow three-wheeler.
+  const AUTO_DISC_OFFSETS = [-1.05, 0.0, 1.10];
+  const AUTO_DISC_RADIUS = 0.64;
+  const VEHICLE_DISCS = {
+    bus: { offsets: BUS_DISC_OFFSETS, radius: BUS_DISC_RADIUS },
+    buggy: { offsets: BUGGY_DISC_OFFSETS, radius: BUGGY_DISC_RADIUS },
+    auto: { offsets: AUTO_DISC_OFFSETS, radius: AUTO_DISC_RADIUS }
+  };
+  const vehicleDiscs = kind => VEHICLE_DISCS[kind] || VEHICLE_DISCS.bus;
+  const vehicleDims = kind => kind === 'auto'
+    ? { halfW: 0.70, halfL: 1.55 }
+    : kind === 'buggy' ? { halfW: 0.82, halfL: 1.72 } : { halfW: 1.26, halfL: 5.05 };
   let queryStamp = 1;
 
   function resolveBusSolidCollisions(stateObj, dynamicObbList) {
@@ -1088,8 +1128,8 @@
         for (let k = 0; k < dynamicObbList.length; k++) candidates.push(dynamicObbList[k]);
       }
 
-      const discOffsets = stateObj.vehicle === 'buggy' ? BUGGY_DISC_OFFSETS : BUS_DISC_OFFSETS;
-      const discRadius = stateObj.vehicle === 'buggy' ? BUGGY_DISC_RADIUS : BUS_DISC_RADIUS;
+      const discOffsets = vehicleDiscs(stateObj.vehicle).offsets;
+      const discRadius = vehicleDiscs(stateObj.vehicle).radius;
       for (let di = 0; di < discOffsets.length; di++) {
         const off = discOffsets[di];
         const dx = stateObj.x + sinH * off;
@@ -1144,11 +1184,11 @@
   // Mass-respecting push vs AI traffic: an 8 t bus ploughs through, a 1.1 t car gets shoved aside.
   // The player's static-collision solver ignores AI cars; they are resolved here instead.
   function resolveBusVsAiCars() {
-    const mPlayer = busState.vehicle === 'buggy' ? 1150 : (FLEET_MASS[busState.fleetKey] || 7800);
+    const mPlayer = FLEET_MASS[busState.fleetKey] || 7800;
     const mCar = AI_CAR_MASS;
     const sinH = Math.sin(busState.heading), cosH = Math.cos(busState.heading);
-    const discOffsets = busState.vehicle === 'buggy' ? BUGGY_DISC_OFFSETS : BUS_DISC_OFFSETS;
-    const discRadius = busState.vehicle === 'buggy' ? BUGGY_DISC_RADIUS : BUS_DISC_RADIUS;
+    const discOffsets = vehicleDiscs(busState.vehicle).offsets;
+    const discRadius = vehicleDiscs(busState.vehicle).radius;
     let hit = false, strongestImpact = 0;
     for (let iter = 0; iter < 2; iter++) {
       for (let i = 0; i < aiCars.length; i++) {
@@ -1198,12 +1238,11 @@
     for (const peer of mp.peers.values()) {
       if (peer.x == null || isNaN(peer.x)) continue;
       const pFleet = FLEET_MASS[peer.fleet] ? peer.fleet : 'transit';
-      const pHalfL = (pFleet === 'buggy') ? 1.72 : 5.05;
-      const pHalfW = (pFleet === 'buggy') ? 0.82 : 1.26;
+      const pDim = vehicleDims(pFleet);
       peers.push({
         kind: 'obb',
         cx: peer.x, cz: peer.z,
-        hx: pHalfW, hz: pHalfL, yaw: peer.heading,
+        hx: pDim.halfW, hz: pDim.halfL, yaw: peer.heading,
         _m: FLEET_MASS[pFleet] || 7800
       });
     }
@@ -1213,10 +1252,10 @@
   function resolveBusVsPeers() {
     const peerObjs = peerObbsForPlayer();
     if (!peerObjs.length) return { hit: false, impact: 0 };
-    const mPlayer = busState.vehicle === 'buggy' ? 1150 : (FLEET_MASS[busState.fleetKey] || 7800);
+    const mPlayer = FLEET_MASS[busState.fleetKey] || 7800;
     const sinH = Math.sin(busState.heading), cosH = Math.cos(busState.heading);
-    const discOffsets = busState.vehicle === 'buggy' ? BUGGY_DISC_OFFSETS : BUS_DISC_OFFSETS;
-    const discRadius = busState.vehicle === 'buggy' ? BUGGY_DISC_RADIUS : BUS_DISC_RADIUS;
+    const discOffsets = vehicleDiscs(busState.vehicle).offsets;
+    const discRadius = vehicleDiscs(busState.vehicle).radius;
     let hit = false, strongestImpact = 0;
     for (let iter = 0; iter < 2; iter++) {
       for (let pi = 0; pi < peerObjs.length; pi++) {
@@ -1861,8 +1900,20 @@
       label: 'Campus Buggy', halfW: 0.82, halfL: 1.72, wheelbase: 2.35, wheelRadius: 0.34,
       maxSpeed: 13.8, reverseMax: 4.6, accel: 7.0, brake: 12.5,
       steerMax: 0.64, eye: { x: 0.34, y: 1.50, z: 0.02 }, hood: { x: 0, y: 1.28, z: 1.65 }
+    },
+    auto: {
+      label: 'Auto Rickshaw', halfW: 0.70, halfL: 1.55, wheelbase: 1.95, wheelRadius: 0.29,
+      maxSpeed: 12.4, reverseMax: 3.4, accel: 6.2, brake: 11.5,
+      steerMax: 0.78, eye: { x: 0, y: 1.62, z: 0.15 }, hood: { x: 0, y: 1.30, z: 1.45 },
+      seats: 3
     }
   };
+
+  // How many riders each vehicle can carry; the auto's rear bench seats three.
+  const VEHICLE_SEATS = { bus: BUS_CAPACITY, buggy: 2, auto: 3 };
+  const vehicleSeats = kind => VEHICLE_SEATS[kind] || VEHICLE_SEATS.bus;
+  // Where the kerb-side door sits relative to the vehicle centreline.
+  const vehicleDoorOffset = kind => vehicleDims(kind).halfW + (kind === 'bus' ? 0.3 : 0.28);
 
   const CAM_MODES = [
     { id: 'cockpit', label: 'Cockpit', key: '1' },
@@ -1996,6 +2047,121 @@
   }
 
   const buggy = createBuggyRig();
+
+  // ---------- Procedural auto-rickshaw: yellow canopy, black lower body, 3 wheels ----------
+  function createAutoRig() {
+    const root = new T.Group();
+    root.name = 'iiserAutoRickshaw';
+    const body = new T.Group();
+    root.add(body);
+
+    const paint = new T.MeshStandardMaterial({ color: 0xf2c21a, roughness: 0.42, metalness: 0.22 });
+    const shell = new T.MeshStandardMaterial({ color: 0x171a1d, roughness: 0.72, metalness: 0.3 });
+    const seatMat = new T.MeshStandardMaterial({ color: 0x2a2018, roughness: 0.92 });
+    const tyreMat = new T.MeshStandardMaterial({ color: 0x15181b, roughness: 0.95 });
+    const rimMat = new T.MeshStandardMaterial({ color: 0xcfd3d8, roughness: 0.32, metalness: 0.75 });
+    const glass = new T.MeshStandardMaterial({
+      color: 0xbfe6ee, roughness: 0.06, metalness: 0.45, transparent: true, opacity: 0.22,
+      side: T.DoubleSide, depthWrite: false
+    });
+
+    const add = (geo, mat, x, y, z, rx, ry, rz) => {
+      const m = new T.Mesh(geo, mat);
+      m.position.set(x, y, z);
+      if (rx) m.rotation.x = rx;
+      if (ry) m.rotation.y = ry;
+      if (rz) m.rotation.z = rz;
+      m.castShadow = true; m.receiveShadow = true;
+      body.add(m);
+      return m;
+    };
+
+    // Chassis floor and the black lower tub.
+    add(new T.BoxGeometry(1.16, 0.10, 2.06), shell, 0, 0.46, -0.10);
+    add(new T.BoxGeometry(1.24, 0.44, 1.36), shell, 0, 0.68, -0.52);
+    add(new T.BoxGeometry(1.24, 0.30, 1.36), paint, 0, 0.98, -0.52);
+
+    // Rear bench.
+    add(new T.BoxGeometry(1.06, 0.16, 0.50), seatMat, 0, 0.80, -0.62);
+    add(new T.BoxGeometry(1.06, 0.48, 0.13), seatMat, 0, 1.06, -0.90, -0.10, 0, 0);
+
+    // Front apron, nose and mudguard over the single front wheel.
+    add(new T.BoxGeometry(0.94, 0.52, 0.54), paint, 0, 0.66, 0.72);
+    add(new T.BoxGeometry(0.74, 0.26, 0.40), shell, 0, 0.46, 1.00);
+    add(new T.CylinderGeometry(0.37, 0.37, 0.30, 12, 1, true, 0, Math.PI), paint, 0, 0.36, 1.02, Math.PI / 2, 0, 0);
+
+    // Roof and pillars.
+    add(new T.BoxGeometry(1.26, 0.09, 1.98), paint, 0, 1.86, -0.14);
+    for (const sx of [-0.60, 0.60]) {
+      for (const sz of [0.62, -0.93]) {
+        add(new T.BoxGeometry(0.06, 0.76, 0.06), shell, sx, 1.44, sz);
+      }
+      // Open sides with a low yellow waist panel.
+      add(new T.BoxGeometry(0.05, 0.42, 1.42), paint, sx, 0.78, -0.20);
+    }
+    add(new T.PlaneGeometry(1.12, 0.74), glass, 0, 1.46, 0.64, -0.16, 0, 0);
+
+    // Driver's seat, floor mat and handlebar.
+    add(new T.BoxGeometry(0.52, 0.14, 0.44), seatMat, 0, 0.78, 0.06);
+    add(new T.BoxGeometry(0.52, 0.55, 0.12), seatMat, 0, 1.02, -0.16, -0.10, 0, 0);
+    add(new T.BoxGeometry(0.86, 0.06, 0.52), shell, 0, 0.52, 0.52);
+    add(new T.CylinderGeometry(0.026, 0.026, 0.30, 8), rimMat, 0, 0.92, 0.60, 0.30, 0, 0);
+    add(new T.CylinderGeometry(0.024, 0.024, 0.56, 8), rimMat, 0, 1.06, 0.56, 0, 0, Math.PI / 2);
+
+    const headLightMat = new T.MeshStandardMaterial({
+      color: 0xfff6da, emissive: new T.Color(0xfff0c0), emissiveIntensity: 1.5, roughness: 0.15
+    });
+    const brakeLightMat = new T.MeshStandardMaterial({
+      color: 0xab1414, emissive: new T.Color(0xff2020), emissiveIntensity: 0.5, roughness: 0.25
+    });
+    const revLightMat = new T.MeshStandardMaterial({
+      color: 0xf4f7ff, emissive: new T.Color(0xffffff), emissiveIntensity: 0.0, roughness: 0.2
+    });
+    const headlamp = new T.Mesh(new T.SphereGeometry(0.085, 10, 10), headLightMat);
+    headlamp.scale.set(1.2, 0.9, 0.55);
+    headlamp.position.set(0, 0.66, 1.20);
+    body.add(headlamp);
+    for (const sx of [-0.44, 0.44]) {
+      const tl = new T.Mesh(new T.BoxGeometry(0.16, 0.12, 0.05), brakeLightMat);
+      tl.position.set(sx, 0.80, -1.21);
+      body.add(tl);
+    }
+
+    // Sign board above the windscreen.
+    const signMat = new T.MeshStandardMaterial({ color: 0x14161a, roughness: 0.6 });
+    add(new T.BoxGeometry(0.96, 0.20, 0.05), signMat, 0, 1.74, 0.66);
+
+    const wheels = [];
+    for (const [wx, wz, front, radius] of [[0, 1.10, true, 0.29], [-0.54, -0.74, false, 0.31], [0.54, -0.74, false, 0.31]]) {
+      const steerPivot = new T.Group();
+      steerPivot.position.set(wx, radius, wz);
+      body.add(steerPivot);
+      const spinPivot = new T.Group();
+      steerPivot.add(spinPivot);
+      const tyre = new T.Mesh(new T.CylinderGeometry(radius, radius, 0.18, 14), tyreMat);
+      tyre.rotation.z = Math.PI / 2;
+      tyre.castShadow = true;
+      const rim = new T.Mesh(new T.CylinderGeometry(radius * 0.5, radius * 0.5, 0.20, 10), rimMat);
+      rim.rotation.z = Math.PI / 2;
+      spinPivot.add(tyre, rim);
+      wheels.push({ steerPivot, spinPivot, front });
+    }
+
+    root.position.set(busState.x, getSurfaceHeight(busState.x, busState.z), busState.z);
+    root.rotation.y = busState.heading;
+    scene.add(root);
+    root.visible = false;
+
+    return {
+      root, body, modelMount: null, cockpit: null, steeringWheel: null, wheels,
+      dashCanvas: null, dashCtx: null, dashTex: null, setDestText: null,
+      headLightMat, brakeLightMat, revLightMat, glbWheels: [], glbDoors: [],
+      wheelRadius: 0.29, activeFleetKey: 'auto', liveryHex: 0xf2c21a,
+      isAuto: true, paintMat: paint
+    };
+  }
+
+  const autoRickshaw = createAutoRig();
   let activeRig = bus;
 
   // ---------- Detailed GLB cockpit cabin so the driver really sits inside ----------
@@ -2048,19 +2214,29 @@
   buildCockpitCabin();
 
   function switchVehicle(kind) {
-    if (kind === 'buggy') {
-      busState.vehicle = 'buggy';
-      busState.fleetKey = 'buggy';
+    if (kind === 'buggy' || kind === 'auto') {
+      busState.vehicle = kind;
+      busState.fleetKey = kind;
       bus.root.visible = false;
-      buggy.root.visible = true;
-      activeRig = buggy;
+      buggy.root.visible = kind === 'buggy';
+      autoRickshaw.root.visible = kind === 'auto';
+      activeRig = kind === 'auto' ? autoRickshaw : buggy;
     } else {
       busState.vehicle = 'bus';
       busState.fleetKey = kind;
       bus.root.visible = true;
       buggy.root.visible = false;
+      autoRickshaw.root.visible = false;
       activeRig = bus;
       equipFleetBus(kind);
+    }
+    // Swapping into a smaller vehicle drops the passengers who no longer fit.
+    const seats = vehicleSeats(busState.vehicle);
+    if (game.passengers > seats) {
+      const excess = game.passengers - seats;
+      game.passengers = seats;
+      if (game.onboard.length > seats) game.onboard.length = seats;
+      flashNotice(excess + ' passenger' + (excess > 1 ? 's' : '') + ' got off · ' + seats + ' seats in this vehicle', 'bad');
     }
     if (ui && ui.fleetSelect) ui.fleetSelect.value = kind;
     syncRigPose(0, true);
@@ -2328,9 +2504,13 @@
 
   // ---------- Game mode definitions & objective state ----------
   const GAME_MODES = [
-    { id: 'free',   label: 'Free Ride',   kicker: 'FREE RIDE' },
-    { id: 'route',  label: 'Mission',     kicker: 'MISSION' },
-    { id: 'multi',  label: 'Multiplayer', kicker: 'MULTIPLAYER · 8P' }
+    { id: 'free',   label: 'Free Ride',       kicker: 'FREE RIDE' },
+    { id: 'route',  label: 'Mission',         kicker: 'MISSION' },
+    { id: 'trial',  label: 'Time Trial',      kicker: 'TIME TRIAL' },
+    { id: 'park',   label: 'Precision Park',  kicker: 'PARKING TEST' },
+    { id: 'safari', label: 'Buggy Safari',    kicker: 'BUGGY SAFARI' },
+    { id: 'multi',  label: 'Multiplayer',     kicker: 'MULTIPLAYER · 8P' },
+    { id: 'chase',  label: 'Chase',           kicker: 'CHASE · RIDER vs CHASERS' }
   ];
 
   const game = {
@@ -2500,6 +2680,7 @@
             '<option value="coach">Executive Coach GLB</option>' +
             '<option value="college">College Bus GLB</option>' +
             '<option value="buggy">Open Buggy</option>' +
+            '<option value="auto">Auto Rickshaw</option>' +
           '</select>' +
           '<select class="sh-select" id="sh-mode">' +
             GAME_MODES.map(m => '<option value="' + m.id + '">' + m.label + '</option>').join('') +
@@ -2541,6 +2722,16 @@
       '<div class="mp-rows" id="mp-rows"></div>';
     document.body.appendChild(mpBoard);
 
+    const chasePanel = makeEl('div', 'chase-panel panel hidden');
+    chasePanel.innerHTML =
+      '<div class="mp-board-head"><span class="mp-board-title" id="chase-title">Chase</span>' +
+      '<span class="mp-room-tag" id="chase-round">LOBBY</span></div>' +
+      '<div class="chase-role" id="chase-role">Waiting for the room…</div>' +
+      '<div class="chase-stats" id="chase-stats"></div>' +
+      '<div class="mp-rows" id="chase-board"></div>' +
+      '<div class="chase-votes" id="chase-votes"></div>';
+    document.body.appendChild(chasePanel);
+
     const tagLayer = makeEl('div', 'mp-nametag-layer');
     document.body.appendChild(tagLayer);
 
@@ -2579,6 +2770,13 @@
       fines: hud.querySelector('#sh-fines'),
       temp: hud.querySelector('#sh-temp'),
       odo: hud.querySelector('#sh-odo'),
+      chasePanel: chasePanel,
+      chaseTitle: chasePanel.querySelector('#chase-title'),
+      chaseRound: chasePanel.querySelector('#chase-round'),
+      chaseRole: chasePanel.querySelector('#chase-role'),
+      chaseStats: chasePanel.querySelector('#chase-stats'),
+      chaseBoard: chasePanel.querySelector('#chase-board'),
+      chaseVotes: chasePanel.querySelector('#chase-votes'),
       modeName: hud.querySelector('#sh-mode-name'),
       objective: hud.querySelector('#sh-objective'),
       stopName: hud.querySelector('#sh-stop-name'),
@@ -2779,6 +2977,15 @@
       game.objectiveText = '8-player cruise';
       game.detailText = 'Share a room code with friends and cruise the campus together.';
       game.statusText = mp.enabled ? ('Room ' + mp.room + ' · ' + (mp.peers.size + 1) + ' drivers') : 'Open Multiplayer to join a room.';
+    } else if (id === 'chase') {
+      chaseResetLocal();
+      game.objectiveText = 'Rider vs chasers';
+      game.detailText = 'One rider banks fares at campus stops while everyone else tries to touch their vehicle. ' +
+        'A catch ends the run and the room votes in the next rider.';
+      game.statusText = mp.enabled
+        ? 'Chase room ' + mp.room + ' · waiting for the round to start…'
+        : 'Chase mode needs a multiplayer room — open Multiplayer.';
+      if (!silent && !mp.enabled) setTimeout(openMpModal, 180);
     } else {
       game.objectiveText = 'Explore';
       game.detailText = 'No objective — drive the campus at your own pace.';
@@ -2797,6 +3004,10 @@
       ui.modeSelect.value = id;
       ui.modeStrip.querySelectorAll('[data-mode]').forEach(b => b.classList.toggle('on', b.dataset.mode === id));
       ui.mpBoard.classList.toggle('hidden', !(mp.enabled || id === 'multi'));
+      if (ui.chasePanel) {
+        ui.chasePanel.classList.toggle('hidden', id !== 'chase');
+        if (id === 'chase') updateChasePanel();
+      }
     }
     if (!silent && ui) ui.status.textContent = game.statusText;
     updateHUD(performance.now() / 1000);
@@ -2954,6 +3165,49 @@
           game.score += 400;
           playStopChime();
         }
+      }
+    } else if (busState.mode === 'chase') {
+      if (!mp.enabled) {
+        game.objectiveText = 'Chase mode';
+        game.statusText = 'Chase needs a room — open Multiplayer and pick Chase.';
+        game.stopName = 'No room joined';
+        ringPulse(-1, t);
+      } else if (chase.phase === 'idle') {
+        game.objectiveText = 'Chase · lobby';
+        game.statusText = 'Waiting for at least two drivers so a rider can be picked.';
+        game.stopName = 'Room ' + mp.room;
+        ringPulse(-1, t);
+      } else if (chase.phase === 'run' && chaseIsRider()) {
+        const st = chase.targetIdx >= 0 ? BUS_STOPS[chase.targetIdx] : null;
+        const d = st ? Math.hypot(busState.x - st.x, busState.z - st.z) : 0;
+        game.objectiveText = 'Rider · ride ' + (chase.rides + 1);
+        game.stopName = st ? 'Next fare · ' + st.name : 'Find a stop';
+        game.stopDist = d;
+        game.stopEta = st ? estimateStopEta(d) : 0;
+        game.nextStopIndex = chase.targetIdx;
+        game.statusText = 'Rides ' + chase.rides + ' · ₹' + Math.round(chase.money) +
+          ' · stop and hold 2 s · chasers are hunting you';
+        ringPulse(chase.targetIdx, t);
+      } else if (chase.phase === 'run') {
+        const riderPeer = mp.peers.get(chase.riderId);
+        const d = riderPeer ? Math.hypot(busState.x - riderPeer.x, busState.z - riderPeer.z) : 0;
+        game.objectiveText = 'Chaser';
+        game.stopName = 'Rider · ' + (chase.riderName || '—');
+        game.stopDist = d;
+        game.stopEta = riderPeer ? estimateStopEta(d) : 0;
+        game.nextStopIndex = -1;
+        game.statusText = 'Close in and touch the rider vehicle · ' + Math.round(d) + ' m';
+        ringPulse(-1, t);
+      } else if (chase.phase === 'vote') {
+        game.objectiveText = 'Round ' + chase.round + ' complete';
+        game.statusText = 'Vote the next rider in the Chase panel';
+        const last = chase.results[chase.results.length - 1];
+        game.stopName = last ? (last.name + ' · ' + last.rides + ' rides · ₹' + last.money) : chase.riderName;
+        ringPulse(-1, t);
+      } else {
+        game.objectiveText = 'Chase complete';
+        game.statusText = chase.winner || 'Every driver has had a turn as rider.';
+        ringPulse(-1, t);
       }
     } else if (busState.mode === 'multi') {
       const near = nearestBusStop(busState.x, busState.z);
@@ -3428,6 +3682,7 @@
     ui.modeStrip.classList.remove('hidden');
     ui.camStrip.classList.remove('hidden');
     ui.mpBoard.classList.toggle('hidden', !(mp.enabled || busState.mode === 'multi'));
+    if (ui.chasePanel) ui.chasePanel.classList.toggle('hidden', busState.mode !== 'chase');
     const info = document.getElementById('info');
     if (info) info.classList.add('hidden');
     setCamMode(busState.camMode);
@@ -3437,7 +3692,7 @@
     camSnap = true;
     if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
     updateHUD(performance.now() / 1000);
-    if (busState.mode === 'multi' && !mp.enabled) setTimeout(openMpModal, 180);
+    if ((busState.mode === 'multi' || busState.mode === 'chase') && !mp.enabled) setTimeout(openMpModal, 180);
   }
 
   function exitDriveMode() {
@@ -3557,11 +3812,22 @@
     if (p.id === localPlayer.id || p.id === mp.serverId) return null;
     let peer = mp.peers.get(p.id);
     if (peer) return peer;
-    const rig = createBusVehicleRig(false);
-    rig.root.name = 'remoteDriver_' + p.id;
     const cIdx = clamp((p.colorIdx | 0) % PLAYER_COLORS.length, 0, PLAYER_COLORS.length - 1);
-    const peerFleet = ['transit', 'coach', 'college'].indexOf(p.fleet) >= 0 ? p.fleet : 'transit';
-    equipRigWithGlb(rig, peerFleet, PLAYER_COLORS[cIdx].hex);
+    const wantsAuto = p.fleet === 'auto' || p.vehicle === 'auto';
+    const isBuggy = p.fleet === 'buggy' || p.vehicle === 'buggy';
+    const peerFleet = wantsAuto ? 'auto' : isBuggy ? 'buggy'
+      : (['transit', 'coach', 'college'].indexOf(p.fleet) >= 0 ? p.fleet : 'transit');
+    let rig;
+    if (wantsAuto || isBuggy) {
+      // Procedural rigs are not GLB-backed, so build one per remote driver.
+      rig = wantsAuto ? createAutoRig() : createBuggyRig();
+      rig.root.name = 'remote' + (wantsAuto ? 'Auto' : 'Buggy') + '_' + p.id;
+      if (wantsAuto) rig.paintMat.color.setHex(PLAYER_COLORS[cIdx].hex);
+    } else {
+      rig = createBusVehicleRig(false);
+      rig.root.name = 'remoteDriver_' + p.id;
+      equipRigWithGlb(rig, peerFleet, PLAYER_COLORS[cIdx].hex);
+    }
     rig.root.position.set(+p.x || 0, getSurfaceHeight(+p.x || 0, +p.z || 0), +p.z || 0);
     rig.root.rotation.y = +p.heading || 0;
     rig.root.visible = true;
@@ -3573,7 +3839,8 @@
       rig, tag, x: +p.x || 0, z: +p.z || 0, y: +p.y || getSurfaceHeight(+p.x || 0, +p.z || 0),
       tx: +p.x || 0, tz: +p.z || 0, ty: +p.y || 0,
       heading: +p.heading || 0, targetHeading: +p.heading || 0,
-      speed: +p.speed || 0, mode: p.mode || 'free', score: +p.score || 0, fleet: peerFleet
+      speed: +p.speed || 0, mode: p.mode || 'free', score: +p.score || 0, fleet: peerFleet,
+      isAuto: peerFleet === 'auto'
     };
     mp.peers.set(p.id, peer);
     updateMpBoard();
@@ -3587,6 +3854,10 @@
     if (peer.tag) peer.tag.remove();
     if (peer.rig && peer.rig.root && peer.rig.root.parent) peer.rig.root.parent.remove(peer.rig.root);
     mp.peers.delete(id);
+    // If the rider drops out mid-run, settle the round instead of stalling the room.
+    if (chase.phase === 'run' && chase.riderId === id && chaseIsAuthority()) {
+      chaseFinalize({ rides: chase.riderRides, money: chase.riderMoney }, 'disconnect');
+    }
     updateMpBoard();
     mpStatusUpdate();
   }
@@ -3595,6 +3866,13 @@
     if (!msg || typeof msg !== 'object' || !msg.type) return;
     if (msg.type === 'state' || msg.type === 'hello') {
       if (msg.id === localPlayer.id) return;
+      // A driver swapping to or from the auto-rickshaw needs a different rig.
+      const wantsAuto = msg.fleet === 'auto' || msg.vehicle === 'auto';
+      const wantsBuggy = msg.fleet === 'buggy' || msg.vehicle === 'buggy';
+      const existing = mp.peers.get(msg.id);
+      if (existing && (!!existing.isAuto !== wantsAuto || (existing.fleet === 'buggy') !== wantsBuggy)) {
+        removePeer(msg.id);
+      }
       const peer = ensurePeer(msg);
       if (peer) {
         peer.tx = +msg.x || 0;
@@ -3605,8 +3883,9 @@
         peer.mode = msg.mode || peer.mode;
         peer.score = +msg.score || 0;
         if (msg.name) peer.name = String(msg.name).slice(0, 18);
-        const fleetKey = ['transit', 'coach', 'college'].indexOf(msg.fleet) >= 0 ? msg.fleet : 'transit';
-        if (fleetKey !== peer.fleet) {
+        const fleetKey = (msg.fleet === 'auto' || msg.fleet === 'buggy') ? msg.fleet
+          : (['transit', 'coach', 'college'].indexOf(msg.fleet) >= 0 ? msg.fleet : 'transit');
+        if (fleetKey !== peer.fleet && fleetKey !== 'auto' && fleetKey !== 'buggy') {
           peer.fleet = fleetKey;
           equipRigWithGlb(peer.rig, fleetKey, PLAYER_COLORS[peer.colorIdx].hex);
         }
@@ -3632,6 +3911,8 @@
       mp.transport = 'error';
       mp.status = 'Room full (' + (msg.maxPlayers || 8) + '/8) · try another code';
       mpStatusUpdate();
+    } else if (msg.type === 'chase') {
+      handleChasePacket(msg);
     } else if (msg.type === 'horn') {
       if (msg.id !== localPlayer.id && mp.peers.has(msg.id)) {
         try { honkHorn(false); } catch (_) {}
@@ -3656,6 +3937,7 @@
 
   function leaveMultiplayer() {
     teardownMp();
+    if (chase.phase !== 'idle') chaseResetLocal();
     mp.status = 'Solo session · 8-player rooms available';
     mpStatusUpdate();
     updateMpBoard();
@@ -3803,7 +4085,9 @@
               if (pid !== conn.peer && gconn.open) { try { gconn.send(msg); } catch (_) {} }
             }
             if (msg.type === 'hello') starBroadcastRoster();
-          } else if (msg.type === 'horn' || msg.type === 'modeStart') {
+          } else if (msg.type === 'horn' || msg.type === 'modeStart' || msg.type === 'chase') {
+            // 'chase' carries chase rounds, catches and votes, so guests must be able
+            // to send it upstream and have the host fan it out to the rest of the room.
             for (const [pid, gconn] of star.guests) {
               if (pid !== conn.peer && gconn.open) { try { gconn.send(msg); } catch (_) {} }
             }
@@ -4069,10 +4353,8 @@
     } else {
       mp.transport = 'ws';
     }
-    if (busState.vehicle === 'buggy') {
-      // keep the buggy; remote players still see a shuttle proxy
-    } else {
-      equipFleetBus(busState.fleetKey === 'buggy' ? 'transit' : busState.fleetKey);
+    if (busState.vehicle === 'bus') {
+      equipFleetBus(busState.fleetKey);
     }
     connectRoomSocket(room, mp.role);
     sendMultiplayerPacket({ type: 'hello', x: busState.x, y: getSurfaceHeight(busState.x, busState.z), z: busState.z, heading: busState.heading, fleet: busState.fleetKey, mode: busState.mode });
@@ -4164,12 +4446,14 @@
                 '<option value="coach">Executive Coach</option>' +
                 '<option value="college">College Bus</option>' +
                 '<option value="buggy">Open Buggy</option>' +
+                '<option value="auto">Auto Rickshaw</option>' +
               '</select></div>' +
             '<div class="mp-field"><label for="mp-mode">Game mode</label>' +
               '<select id="mp-mode" class="mp-input">' +
                 '<option value="route">Mission (shuttle run)</option>' +
                 '<option value="free">Free Ride</option>' +
                 '<option value="multi">8P Cruise (freeroam)</option>' +
+                '<option value="chase">Chase (rider vs chasers)</option>' +
               '</select></div>' +
           '</div>' +
           '<div class="mp-field"><label>Bus colour</label><div class="mp-swatches" id="mp-colors"></div></div>' +
@@ -4216,7 +4500,7 @@
         const fleet = fleetSel ? fleetSel.value : 'transit';
         const mode = modeSel ? modeSel.value : 'route';
         localPlayer.colorIdx = modal.querySelector('.mp-swatch.on') ? +modal.querySelector('.mp-swatch.on').dataset.color : localPlayer.colorIdx;
-        switchVehicle(fleet === 'buggy' ? 'buggy' : fleet);
+        switchVehicle(fleet);
         startMultiplayer(room, name, localPlayer.colorIdx, mode, role);
       };
       modal.querySelector('#mp-host').addEventListener('click', () => {
@@ -4352,9 +4636,12 @@
         peer.rig.root.rotation.y = peer.heading;
         
         // Spin wheels based on speed
-        const spin = (peer.speed / 0.48) * dt;
+        const spin = (peer.speed / (peer.rig.wheelRadius || 0.48)) * dt;
         if (peer.rig.glbWheels) {
           for (const w of peer.rig.glbWheels) if (w.spinPivot) w.spinPivot.rotation.x += spin;
+        }
+        if (peer.rig.wheels && peer.rig.wheels.length) {
+          for (const w of peer.rig.wheels) if (w.spinPivot) w.spinPivot.rotation.x += spin;
         }
         
         // Update trail visibility based on peer activity
@@ -4409,6 +4696,394 @@
     }
   }
 
+  // ---------- Chase mode: one rider banks fares while the rest of the room hunts ----------
+  // Round flow: the room votes a rider in, that rider completes pickups for cash, and the
+  // first chaser to touch the rider's vehicle ends the run. The room then votes for the
+  // next rider among drivers who have not ridden yet, until everyone has had a turn.
+  const CHASE_VOTE_SECONDS = 8;
+  const CHASE_RIDE_DWELL = 2.0;
+  const chase = {
+    phase: 'idle',          // idle | run | vote | done
+    round: 0, total: 0,
+    riderId: '', riderName: '', riderColor: 0,
+    rides: 0, money: 0, targetIdx: -1, lastTarget: -1, dwell: 0,
+    riderRides: 0, riderMoney: 0,
+    results: [],            // one row per finished rider run
+    votes: {},              // voterId -> candidateId
+    voteEndsAt: 0, pendingCatchAt: 0, pendingCatchBy: '',
+    winner: '', beginAt: 0, lastProgress: 0, lastPanel: 0, panelSig: '', graceUntil: 0
+  };
+
+  const chaseNow = () => performance.now() / 1000;
+
+  function chasePlayers() {
+    const list = [{ id: localPlayer.id, name: localPlayer.name, colorIdx: localPlayer.colorIdx }];
+    for (const p of mp.peers.values()) list.push({ id: p.id, name: p.name, colorIdx: p.colorIdx });
+    return list.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  }
+  // Every client elects the same driver (lowest id) to run the rounds, so rounds and
+  // votes stay in one place without needing a dedicated server.
+  function chaseAuthorityId() {
+    if (!mp.enabled) return '';
+    const list = chasePlayers();
+    return list.length ? list[0].id : '';
+  }
+  function chaseIsAuthority() { return chaseAuthorityId() === localPlayer.id; }
+  function chaseIsRider() { return chase.phase === 'run' && chase.riderId === localPlayer.id; }
+
+  function chaseBroadcast(payload) {
+    if (!mp.enabled) return;
+    sendMultiplayerPacket(Object.assign({ type: 'chase' }, payload));
+  }
+
+  function chaseResetLocal() {
+    chase.phase = 'idle'; chase.round = 0; chase.total = 0;
+    chase.riderId = ''; chase.riderName = ''; chase.riderColor = 0;
+    chase.rides = 0; chase.money = 0; chase.targetIdx = -1; chase.lastTarget = -1; chase.dwell = 0;
+    chase.riderRides = 0; chase.riderMoney = 0;
+    chase.results.length = 0; chase.votes = {};
+    chase.voteEndsAt = 0; chase.pendingCatchAt = 0; chase.pendingCatchBy = '';
+    chase.winner = ''; chase.beginAt = chaseNow(); chase.panelSig = '';
+    updateChasePanel();
+  }
+
+  function chasePickTarget() {
+    let best = -1, bestScore = -Infinity;
+    for (let i = 0; i < BUS_STOPS.length; i++) {
+      const st = BUS_STOPS[i];
+      if (i === chase.lastTarget) continue;
+      const d = Math.hypot(st.x - busState.x, st.z - busState.z);
+      if (d < 45) continue;
+      const score = d + Math.random() * 60;
+      if (score > bestScore) { bestScore = score; best = i; }
+    }
+    if (best >= 0) return best;
+    return chase.lastTarget === 0 ? 1 : 0;
+  }
+
+  function chaseApplyStart(msg) {
+    chase.phase = 'run';
+    chase.round = msg.round | 0;
+    chase.total = msg.total | 0;
+    chase.riderId = msg.riderId || '';
+    chase.riderName = msg.riderName || 'Rider';
+    chase.riderColor = msg.riderColor | 0;
+    if (Array.isArray(msg.results)) chase.results = msg.results.slice();
+    chase.rides = 0; chase.money = 0; chase.dwell = 0; chase.targetIdx = -1;
+    chase.riderRides = 0; chase.riderMoney = 0;
+    chase.votes = {}; chase.voteEndsAt = 0;
+    chase.pendingCatchAt = 0; chase.pendingCatchBy = '';
+    chase.winner = '';
+    if (chaseIsRider()) chase.targetIdx = chasePickTarget();
+    chase.panelSig = '';
+    // Spread the field. Everyone shares one spawn, so without this the rider and
+    // chasers would start touching and the round would end on the first frame.
+    if (busState.active) {
+      const players = chasePlayers();
+      const idx = Math.max(0, players.findIndex(p => p.id === localPlayer.id));
+      const stopIdx = chaseIsRider() ? 0 : 1 + (idx % Math.max(1, BUS_STOPS.length - 1));
+      const st = BUS_STOPS[stopIdx % BUS_STOPS.length];
+      if (st) {
+        const sp = findNearestRoadPoint(st.x, st.z);
+        busState.x = sp.x; busState.z = sp.z; busState.heading = sp.heading;
+        busState.speed = 0; busState.steer = 0;
+        syncRigPose(0, true);
+      }
+    }
+    chase.graceUntil = chaseNow() + 3.0;
+    if (ui) {
+      flashNotice(chaseIsRider()
+        ? 'Round ' + chase.round + ' · you are the RIDER'
+        : 'Round ' + chase.round + ' · hunt ' + chase.riderName, chaseIsRider() ? 'good' : 'bad');
+    }
+    updateChasePanel();
+  }
+
+  function chaseFinalize(final, by) {
+    if (chase.phase !== 'run') return;
+    const isRider = chaseIsRider();
+    if (!isRider && !final) {
+      // Chasers only flag the contact; the rider confirms the exact takings.
+      if (!chase.pendingCatchAt) {
+        chase.pendingCatchAt = chaseNow();
+        chase.pendingCatchBy = by || 'a chaser';
+      }
+      return;
+    }
+    const rides = final && final.rides != null ? final.rides : (isRider ? chase.rides : chase.riderRides);
+    const money = final && final.money != null ? final.money : (isRider ? chase.money : chase.riderMoney);
+    chase.phase = 'vote';
+    chase.voteEndsAt = chaseNow() + CHASE_VOTE_SECONDS;
+    chase.pendingCatchAt = 0;
+    chase.results.push({
+      id: chase.riderId, name: chase.riderName, colorIdx: chase.riderColor,
+      rides: Math.max(0, rides | 0), money: Math.max(0, Math.round(money || 0))
+    });
+    chase.votes = {};
+    if (isRider) {
+      chase.rides = 0; chase.money = 0; chase.targetIdx = -1; chase.dwell = 0;
+      chaseBroadcast({
+        action: 'end', riderId: chase.riderId, rides: rides | 0, money: Math.round(money || 0),
+        by: by || chase.pendingCatchBy || ''
+      });
+    }
+    chase.panelSig = '';
+    if (ui) {
+      flashNotice(chase.riderName + ' caught by ' + (by || chase.pendingCatchBy || 'a chaser') +
+        ' · ' + (rides | 0) + ' rides · ₹' + Math.round(money || 0), 'bad');
+    }
+    updateChasePanel();
+  }
+
+  function chaseContactPeer(peer) {
+    const mine = vehicleDiscs(busState.vehicle);
+    const other = vehicleDims(peer.fleet);
+    if (!mine || !peer) return false;
+    if (Math.hypot(peer.x - busState.x, peer.z - busState.z) > Math.abs(mine.offsets[mine.offsets.length - 1]) + other.halfL + 3.4) return false;
+    const sinH = Math.sin(busState.heading), cosH = Math.cos(busState.heading);
+    const obb = { kind: 'obb', cx: peer.x, cz: peer.z, hx: other.halfW, hz: other.halfL, yaw: peer.heading };
+    for (let i = 0; i < mine.offsets.length; i++) {
+      const off = mine.offsets[i];
+      if (testDiscVsObstacle(busState.x + sinH * off, busState.z + cosH * off, mine.radius, obb)) return true;
+    }
+    return false;
+  }
+
+  function chaseReportContact(byName) {
+    if (chase.phase !== 'run') return;
+    if (chaseIsRider()) { chaseFinalize(null, byName || 'a chaser'); return; }
+    if (!chase.pendingCatchAt) {
+      chase.pendingCatchAt = chaseNow();
+      chase.pendingCatchBy = byName || localPlayer.name;
+    }
+    chaseBroadcast({ action: 'catch', riderId: chase.riderId, by: byName || localPlayer.name });
+  }
+
+  function chaseCastVote(candidateId) {
+    if (chase.phase !== 'vote' || !candidateId) return;
+    if (chase.votes[localPlayer.id] === candidateId) return;
+    chase.votes[localPlayer.id] = candidateId;
+    chaseBroadcast({ action: 'vote', voter: localPlayer.id, candidate: candidateId });
+    chase.panelSig = '';
+    updateChasePanel();
+  }
+
+  function chaseAdvanceRound(t) {
+    if (chase.phase !== 'vote' || !chaseIsAuthority()) return;
+    const players = chasePlayers();
+    const ridden = new Set(chase.results.map(r => r.id));
+    const candidates = players.filter(p => !ridden.has(p.id));
+    const voted = Object.keys(chase.votes).filter(v => players.some(p => p.id === v)).length;
+    if (voted < players.length && t < chase.voteEndsAt) return;
+    if (!candidates.length) {
+      const board = chase.results.slice().sort((a, b) => (b.money - a.money) || (b.rides - a.rides));
+      const w = board[0];
+      chase.phase = 'done';
+      chase.winner = w ? (w.name + ' wins · ' + w.rides + ' rides · ₹' + w.money) : '';
+      chase.panelSig = '';
+      chaseBroadcast({ action: 'finish', winner: chase.winner, results: chase.results });
+      updateChasePanel();
+      return;
+    }
+    const tally = new Map(candidates.map(c => [c.id, 0]));
+    for (const v of Object.values(chase.votes)) if (tally.has(v)) tally.set(v, tally.get(v) + 1);
+    let next = candidates[0];
+    for (const c of candidates) if ((tally.get(c.id) || 0) > (tally.get(next.id) || 0)) next = c;
+    chaseApplyStart({
+      round: chase.round + 1, total: players.length,
+      riderId: next.id, riderName: next.name, riderColor: next.colorIdx, results: chase.results
+    });
+    chaseBroadcast({
+      action: 'start', round: chase.round, total: chase.total,
+      riderId: next.id, riderName: next.name, riderColor: next.colorIdx, results: chase.results
+    });
+  }
+
+  function handleChasePacket(msg) {
+    if (!msg || msg.id === localPlayer.id) return;
+    // Only chase players track rounds; everyone else keeps cruising.
+    if (busState.mode !== 'chase' || !mp.enabled) return;
+    if (msg.action === 'start') chaseApplyStart(msg);
+    else if (msg.action === 'progress') {
+      if (msg.riderId && msg.riderId === chase.riderId) {
+        chase.riderRides = Math.max(chase.riderRides, +msg.rides || 0);
+        chase.riderMoney = Math.max(chase.riderMoney, +msg.money || 0);
+        updateChasePanel();
+      }
+    } else if (msg.action === 'catch') {
+      if (msg.riderId === chase.riderId) chaseFinalize(null, msg.by);
+    } else if (msg.action === 'end') {
+      if (msg.riderId === chase.riderId) chaseFinalize({ rides: +msg.rides || 0, money: +msg.money || 0 }, msg.by);
+    } else if (msg.action === 'vote') {
+      if (chase.phase === 'vote' && msg.voter && msg.candidate) {
+        chase.votes[msg.voter] = msg.candidate;
+        chase.panelSig = '';
+        updateChasePanel();
+      }
+    } else if (msg.action === 'finish') {
+      chase.phase = 'done';
+      chase.winner = msg.winner || '';
+      if (Array.isArray(msg.results)) chase.results = msg.results.slice();
+      chase.panelSig = '';
+      updateChasePanel();
+    }
+  }
+
+  function chaseBoardRows() {
+    const rows = chase.results.slice();
+    if (chase.phase === 'run' && chaseIsRider()) {
+      rows.push({
+        id: localPlayer.id, name: localPlayer.name, colorIdx: localPlayer.colorIdx,
+        rides: chase.rides, money: chase.money, live: true
+      });
+    } else if (chase.phase === 'run') {
+      const rp = mp.peers.get(chase.riderId);
+      if (rp) {
+        rows.push({
+          id: rp.id, name: rp.name, colorIdx: rp.colorIdx,
+          rides: chase.riderRides, money: chase.riderMoney, live: true
+        });
+      }
+    }
+    return rows.sort((a, b) => (b.money - a.money) || (b.rides - a.rides));
+  }
+
+  function updateChasePanel() {
+    if (!ui || !ui.chasePanel) return;
+    const show = busState.active && busState.mode === 'chase';
+    ui.chasePanel.classList.toggle('hidden', !show);
+    if (!show) return;
+
+    const players = chasePlayers();
+    const rider = chaseIsRider();
+    const ridden = new Set(chase.results.map(r => r.id));
+    const candidates = players.filter(p => !ridden.has(p.id));
+    const role = chase.phase === 'run'
+      ? (rider ? 'You are the RIDER' : 'You are a CHASER · rider: ' + chase.riderName)
+      : chase.phase === 'vote' ? 'Round over · vote the next rider'
+        : chase.phase === 'done' ? (chase.winner || 'Chase complete')
+          : (mp.enabled ? 'Waiting for more drivers…' : 'Open Multiplayer and pick a room');
+    const sig = [chase.phase, chase.round, chase.riderId, chase.rides, chase.money, chase.riderRides,
+      chase.riderMoney, chase.winner, players.length, Object.keys(chase.votes).join('|'),
+      Object.values(chase.votes).join('|')].join('#');
+    if (sig === chase.panelSig) return;
+    chase.panelSig = sig;
+
+    ui.chaseTitle.textContent = 'Chase';
+    ui.chaseRound.textContent = chase.phase === 'run' ? 'ROUND ' + chase.round + '/' + Math.max(1, chase.total)
+      : chase.phase === 'vote' ? 'VOTE' : chase.phase === 'done' ? 'FINAL' : 'LOBBY';
+    ui.chaseRole.textContent = role;
+    ui.chaseRole.classList.toggle('chaser', chase.phase === 'run' && !rider);
+    ui.chaseStats.innerHTML = rider
+      ? '<span>Rides <strong>' + chase.rides + '</strong></span><span>Cash <strong>₹' + Math.round(chase.money) + '</strong></span>'
+      : '<span>Rider <strong>' + escapeHtml(chase.riderName || '—') + '</strong></span>' +
+        '<span>Rides <strong>' + (chase.phase === 'run' ? chase.riderRides : '—') + '</strong></span>';
+
+    const rows = chaseBoardRows();
+    let html = '';
+    rows.forEach((r, i) => {
+      const c = PLAYER_COLORS[(r.colorIdx | 0) % PLAYER_COLORS.length];
+      html += '<div class="mp-row' + (r.id === localPlayer.id ? ' me' : '') + '">' +
+        '<span class="mp-rank">' + (i + 1) + '</span>' +
+        '<span class="mp-dot" style="background:' + c.css + '"></span>' +
+        '<span class="mp-name">' + escapeHtml(r.name) + (r.live ? ' · live' : '') + '</span>' +
+        '<span class="mp-val">' + (r.rides | 0) + 'R · ₹' + (r.money | 0) + '</span>' +
+        '</div>';
+    });
+    if (!rows.length) html = '<div class="chase-note">No completed runs yet.</div>';
+    ui.chaseBoard.innerHTML = html;
+
+    if (chase.phase === 'vote') {
+      let votesHtml = '<div class="chase-note">Pick who rides next' +
+        (chase.votes[localPlayer.id] ? ' · your vote is in' : '') + '</div>';
+      for (const c of candidates) {
+        const on = chase.votes[localPlayer.id] === c.id;
+        votesHtml += '<button class="btn' + (on ? ' primary' : '') + '" type="button" data-vote="' +
+          escapeHtml(c.id) + '">' + escapeHtml(c.name) + '</button>';
+      }
+      ui.chaseVotes.innerHTML = votesHtml;
+      ui.chaseVotes.querySelectorAll('[data-vote]').forEach(b => {
+        b.onclick = () => chaseCastVote(b.getAttribute('data-vote'));
+      });
+    } else {
+      ui.chaseVotes.innerHTML = '';
+    }
+  }
+
+  function updateChase(dt, t) {
+    if (busState.mode !== 'chase' || !busState.active) return;
+    // All chase timers use the wall clock (chaseNow), so ignore the render clock here.
+    t = chaseNow();
+    if (!mp.enabled) {
+      if (chase.phase !== 'idle') chaseResetLocal();
+      if (t - chase.lastPanel > 0.5) { chase.lastPanel = t; updateChasePanel(); }
+      return;
+    }
+    const players = chasePlayers();
+
+    if (chase.phase === 'idle') {
+      if (players.length >= 2 && chaseIsAuthority() && t - chase.beginAt > 2.5) {
+        const first = players[0];
+        chaseApplyStart({
+          round: 1, total: players.length,
+          riderId: first.id, riderName: first.name, riderColor: first.colorIdx, results: []
+        });
+        chaseBroadcast({
+          action: 'start', round: 1, total: players.length,
+          riderId: first.id, riderName: first.name, riderColor: first.colorIdx, results: []
+        });
+      }
+      if (t - chase.lastPanel > 0.5) { chase.lastPanel = t; updateChasePanel(); }
+      return;
+    }
+
+    if (chase.phase === 'run') {
+      if (chaseIsRider()) {
+        if (chase.targetIdx < 0) chase.targetIdx = chasePickTarget();
+        const st = BUS_STOPS[chase.targetIdx];
+        if (st) {
+          const d = Math.hypot(busState.x - st.x, busState.z - st.z);
+          if (d < 12 && Math.abs(busState.speed) < 1.2) {
+            chase.dwell += dt;
+            if (chase.dwell >= CHASE_RIDE_DWELL) {
+              chase.dwell = 0;
+              chase.rides += 1;
+              chase.money += 40 + chase.rides * 10;
+              chase.lastTarget = chase.targetIdx;
+              chase.targetIdx = chasePickTarget();
+              chase.panelSig = '';
+              try { playStopChime(); } catch (_) {}
+              flashNotice('Ride ' + chase.rides + ' done · ₹' + chase.money, 'good');
+              updateChasePanel();
+            }
+          } else chase.dwell = 0;
+        }
+        if (t - chase.lastProgress > 0.45) {
+          chase.lastProgress = t;
+          chaseBroadcast({ action: 'progress', riderId: chase.riderId, rides: chase.rides, money: chase.money });
+        }
+        if (t >= chase.graceUntil) {
+          for (const peer of mp.peers.values()) {
+            if (chaseContactPeer(peer)) { chaseFinalize(null, peer.name); break; }
+          }
+        }
+      } else {
+        const riderPeer = mp.peers.get(chase.riderId);
+        if (riderPeer && t >= chase.graceUntil && Math.abs(busState.speed) > 0.4 && chaseContactPeer(riderPeer)) {
+          chaseReportContact(localPlayer.name);
+        }
+      }
+      // Rider left the room without confirming — the authority settles the run.
+      if (chase.pendingCatchAt && t - chase.pendingCatchAt > 1.4 && chaseIsAuthority()) {
+        chaseFinalize({ rides: chase.riderRides, money: chase.riderMoney }, chase.pendingCatchBy);
+      }
+    } else if (chase.phase === 'vote') {
+      chaseAdvanceRound(t);
+    }
+
+    if (t - chase.lastPanel > 0.4) { chase.lastPanel = t; updateChasePanel(); }
+  }
+
   // ---------- Frame loop hooks ----------
   // Waiting students walk to the bus door and climb aboard when the bus dwells at a stop;
   // passengers alight onto the shelter side. Each student has a destination stop,
@@ -4433,7 +5108,8 @@
     for (let i = 0; i < n; i++) {
       const rig = createStudentRig(i + 1, (game.passengers + i) % 4);
       const stu = rig.stu;
-      const doorX = busState.x + leftX * 1.35, doorZ = busState.z + leftZ * 1.35;
+      const doorOff = vehicleDoorOffset(busState.vehicle);
+      const doorX = busState.x + leftX * doorOff, doorZ = busState.z + leftZ * doorOff;
       const gy = getSurfaceHeight(doorX, doorZ);
       stu.position.set(doorX, gy + 0.02, doorZ);
       const dx = shelX - doorX, dz = shelZ - doorZ;
@@ -4453,7 +5129,7 @@
   // Free Ride and Multiplayer still honour the campus pickup points:
   // stop the bus inside a stop bay and students walk aboard.
   function updateStopService(dt, t) {
-    if (!busState.active || busState.vehicle !== 'bus' || busState.mode === 'route') return;
+    if (!busState.active || busState.mode === 'route' || busState.mode === 'chase') return;
     const near = nearestBusStop(busState.x, busState.z);
     const stopped = Math.abs(busState.speed) < 0.8;
     const within = !!near && near.d < 11;
@@ -4485,20 +5161,21 @@
         m.position.y = s.home.y + Math.abs(Math.sin(t * 1.7 + s.phase)) * 0.018;
         m.rotation.y = s.homeRot + Math.sin(t * 0.55 + s.phase) * 0.22;
         const st = BUS_STOPS[s.stopIndex];
-        const full = game.passengers >= BUS_CAPACITY;
+        const full = game.passengers >= vehicleSeats(busState.vehicle);
         if (full && game.dwellStopIndex === s.stopIndex && t - (game.fullNoticeAt || 0) > 7) {
           game.fullNoticeAt = t;
-          flashNotice('Bus full · ' + game.passengers + ' on board, drop passengers first', 'bad');
+          flashNotice((busState.vehicle === 'bus' ? 'Bus full' : 'Vehicle full') + ' · ' + game.passengers + ' on board, drop passengers first', 'bad');
         }
-        if (!full && busState.active && busState.vehicle === 'bus' && game.dwellStopIndex === s.stopIndex && Math.abs(busState.speed) < 0.8) {
+        if (!full && busState.active && game.dwellStopIndex === s.stopIndex && Math.abs(busState.speed) < 0.8) {
           const d = Math.hypot(busState.x - st.x, busState.z - st.z);
           if (d < 11) {
             const shx = s.shelterX != null ? s.shelterX : st.x;
             const shz = s.shelterZ != null ? s.shelterZ : st.z;
             let dx = shx - busState.x, dz = shz - busState.z;
             const len = Math.hypot(dx, dz) || 1;
-            s.doorX = busState.x + (dx / len) * 1.55;
-            s.doorZ = busState.z + (dz / len) * 1.55;
+            const doorOff = vehicleDoorOffset(busState.vehicle);
+            s.doorX = busState.x + (dx / len) * doorOff;
+            s.doorZ = busState.z + (dz / len) * doorOff;
             s.fromX = m.position.x;
             s.fromZ = m.position.z;
             s.fromY = m.position.y;
@@ -4589,9 +5266,184 @@
       if (t - dashAt > 0.15) { dashAt = t; updateDash(t); }
     }
     updateMultiplayer(dt, t);
+    updateChase(dt, t);
   }
 
   W.onFrame(gameLoop);
+
+  // ---------- Road-following guidance path for the minimap ----------
+  // The minimap used to join the bus and the next stop with one straight
+  // dashed line, so the "route" cut through lawns, buildings and the lake.
+  // Build a light graph of the real driveable roads and route the guidance
+  // line along them instead.
+  const navRoadGraph = (function buildRoadGraph() {
+    const nodes = [], buckets = new Map();
+    const BK = 24; // junction-search bucket size, metres
+    const bkey = (x, z) => Math.floor(x / BK) + ',' + Math.floor(z / BK);
+    const addNode = (x, z, road) => {
+      const i = nodes.length;
+      nodes.push({ x, z, road, links: [] });
+      const k = bkey(x, z);
+      let b = buckets.get(k);
+      if (!b) { b = []; buckets.set(k, b); }
+      b.push(i);
+      return i;
+    };
+    for (let ri = 0; ri < D.roads.length; ri++) {
+      const r = D.roads[ri];
+      if (!r.isDriveable || !r.pts || r.pts.length < 2) continue;
+      let prev = -1;
+      for (const p of r.pts) {
+        const id = addNode(p[0], p[1], ri);
+        if (prev >= 0) {
+          const d = Math.hypot(nodes[id].x - nodes[prev].x, nodes[id].z - nodes[prev].z);
+          if (d > 0.05) { nodes[prev].links.push([id, d]); nodes[id].links.push([prev, d]); }
+        }
+        prev = id;
+      }
+    }
+    // Stitch separate OSM ways at shared junctions. Endpoints can sit a few
+    // metres apart after projection; only link different roads so hairpins
+    // and switchbacks are not shortcut across their own arms.
+    for (let i = 0; i < nodes.length; i++) {
+      const n = nodes[i];
+      const bx = Math.floor(n.x / BK), bz = Math.floor(n.z / BK);
+      for (let gx = bx - 1; gx <= bx + 1; gx++) {
+        for (let gz = bz - 1; gz <= bz + 1; gz++) {
+          const b = buckets.get(gx + ',' + gz);
+          if (!b) continue;
+          for (const j of b) {
+            if (j <= i || nodes[j].road === n.road) continue;
+            const d = Math.hypot(nodes[j].x - n.x, nodes[j].z - n.z);
+            if (d <= 12) { n.links.push([j, d]); nodes[j].links.push([i, d]); }
+          }
+        }
+      }
+    }
+    return { nodes };
+  })();
+
+  function navNearestNode(x, z) {
+    const ns = navRoadGraph.nodes;
+    let best = -1, bestD = Infinity;
+    for (let i = 0; i < ns.length; i++) {
+      const dx = ns[i].x - x, dz = ns[i].z - z;
+      const d = dx * dx + dz * dz;
+      if (d < bestD) { bestD = d; best = i; }
+    }
+    return best;
+  }
+
+  function navHeapPush(heap, item) {
+    heap.push(item);
+    let i = heap.length - 1;
+    while (i > 0) {
+      const p = (i - 1) >> 1;
+      if (heap[p][0] <= item[0]) break;
+      heap[i] = heap[p];
+      i = p;
+    }
+    heap[i] = item;
+  }
+
+  function navHeapPop(heap) {
+    const top = heap[0], last = heap.pop();
+    if (heap.length) {
+      let i = 0;
+      const n = heap.length;
+      for (;;) {
+        let c = i * 2 + 1;
+        if (c >= n) break;
+        if (c + 1 < n && heap[c + 1][0] < heap[c][0]) c++;
+        if (heap[c][0] >= last[0]) break;
+        heap[i] = heap[c];
+        i = c;
+      }
+      heap[i] = last;
+    }
+    return top;
+  }
+
+  // A* over the road graph. Returns the polyline from the road node nearest
+  // the bus to the road node nearest the target, ending at the target itself.
+  function navFindRoadPath(sx, sz, tx, tz) {
+    const ns = navRoadGraph.nodes;
+    if (!ns.length) return null;
+    const start = navNearestNode(sx, sz);
+    const goal = navNearestNode(tx, tz);
+    if (start < 0 || goal < 0) return null;
+    if (start === goal) return [[tx, tz]];
+    const hx = ns[goal].x, hz = ns[goal].z;
+    const h = i => Math.hypot(ns[i].x - hx, ns[i].z - hz);
+    const gScore = new Map([[start, 0]]);
+    const cameFrom = new Map();
+    const closed = new Set();
+    const heap = [];
+    navHeapPush(heap, [h(start), start]);
+    let guard = 0;
+    while (heap.length && guard++ < 60000) {
+      const cur = navHeapPop(heap)[1];
+      if (cur === goal) {
+        const pts = [[tx, tz]];
+        let c = cur;
+        while (c !== start) {
+          const p = cameFrom.get(c);
+          if (p == null) break;
+          pts.push([ns[p].x, ns[p].z]);
+          c = p;
+        }
+        pts.reverse();
+        return pts;
+      }
+      if (closed.has(cur)) continue;
+      closed.add(cur);
+      const gc = gScore.get(cur);
+      for (const link of ns[cur].links) {
+        const to = link[0], d = link[1];
+        if (closed.has(to)) continue;
+        const ng = gc + d;
+        const old = gScore.has(to) ? gScore.get(to) : Infinity;
+        if (ng < old) {
+          gScore.set(to, ng);
+          cameFrom.set(to, cur);
+          navHeapPush(heap, [ng + h(to), to]);
+        }
+      }
+    }
+    return null;
+  }
+
+  const navPathCache = { key: '', at: -1e9, pts: null, sx: 0, sz: 0 };
+  function navPathToTarget(sx, sz, tx, tz) {
+    const t = performance.now();
+    const key = Math.round(tx * 2) + ',' + Math.round(tz * 2);
+    const stale = !navPathCache.pts || Math.hypot(sx - navPathCache.sx, sz - navPathCache.sz) > 40;
+    if (navPathCache.key === key && t - navPathCache.at < 1600 && !stale) return navPathCache.pts;
+    const pts = navFindRoadPath(sx, sz, tx, tz);
+    navPathCache.key = key;
+    navPathCache.at = t;
+    navPathCache.pts = pts;
+    navPathCache.sx = sx;
+    navPathCache.sz = sz;
+    return pts;
+  }
+
+  // Each route is a fixed loop, so its road-following legs only need to be
+  // routed once. Stops are already snapped to the carriageway by this point.
+  const navRouteLegCache = [];
+  function navRouteLegs(routeIdx) {
+    const rt = ROUTES[routeIdx];
+    if (!rt) return null;
+    if (navRouteLegCache[routeIdx]) return navRouteLegCache[routeIdx];
+    const legs = [];
+    for (let i = 0; i < rt.stops.length; i++) {
+      const a = BUS_STOPS[rt.stops[i]];
+      const b = BUS_STOPS[rt.stops[(i + 1) % rt.stops.length]];
+      legs.push(a && b ? navFindRoadPath(a.x, a.z, b.x, b.z) : null);
+    }
+    navRouteLegCache[routeIdx] = legs;
+    return legs;
+  }
 
   if (W.onMinimapDraw) {
     W.onMinimapDraw((ctx, mx, my, mapRot) => {
@@ -4618,12 +5470,21 @@
         ctx.globalAlpha = 0.82;
         ctx.lineWidth = 2.6;
         ctx.lineJoin = 'round';
+        ctx.lineCap = 'round';
         ctx.beginPath();
+        // Follow the real roads between stops instead of cutting straight
+        // chords across lawns and buildings.
+        const legs = navRouteLegs(info.activeIdx);
         active.stops.forEach((st, i) => {
-          if (i === 0) ctx.moveTo(mx(st.x), my(st.z));
-          else ctx.lineTo(mx(st.x), my(st.z));
+          ctx.moveTo(mx(st.x), my(st.z));
+          const leg = legs && legs[i];
+          if (leg && leg.length) {
+            for (let pi = 0; pi < leg.length; pi++) ctx.lineTo(mx(leg[pi][0]), my(leg[pi][1]));
+          } else {
+            const nb = active.stops[(i + 1) % active.stops.length];
+            ctx.lineTo(mx(nb.x), my(nb.z));
+          }
         });
-        ctx.closePath();
         ctx.stroke();
         // Direction-of-travel dashes drifting along the line.
         ctx.strokeStyle = 'rgba(255,255,255,0.5)';
@@ -4665,7 +5526,9 @@
         if (offScreen) {
           const px = Math.max(10, Math.min(cw - 10, nx));
           const py = Math.max(10, Math.min(chh - 10, ny));
-          const ang = Math.atan2(ny - my(busState.z), nx - mx(busState.x)) - (mapRot || 0);
+          // The hook already draws inside the heading-up rotation, so this is
+          // a plain screen-space angle (subtracting mapRot pointed it wrong).
+          const ang = Math.atan2(ny - my(busState.z), nx - mx(busState.x));
           ctx.save();
           ctx.translate(px, py);
           ctx.rotate(ang);
@@ -4681,15 +5544,28 @@
           ctx.stroke();
           ctx.restore();
         }
-        // Bearing line from bus to next stop
+        // Guidance line along the real roads, not a straight cut across the campus.
+        // It gets a dark casing and a white core so it stays readable on top of
+        // the route outline (which follows the same carriageway).
         ctx.save();
-        ctx.setLineDash([5, 4]);
-        ctx.strokeStyle = routeMode && active ? active.color : 'rgba(255,255,255,0.7)';
-        ctx.lineWidth = 2;
-        ctx.globalAlpha = 0.8;
+        ctx.globalAlpha = 1;
+        ctx.lineJoin = 'round';
+        ctx.lineCap = 'round';
         ctx.beginPath();
         ctx.moveTo(mx(busState.x), my(busState.z));
-        ctx.lineTo(nx, ny);
+        const path = navPathToTarget(busState.x, busState.z, next.x, next.z);
+        if (path && path.length) {
+          for (let pi = 0; pi < path.length; pi++) ctx.lineTo(mx(path[pi][0]), my(path[pi][1]));
+        } else {
+          ctx.lineTo(nx, ny);
+        }
+        ctx.setLineDash([]);
+        ctx.strokeStyle = 'rgba(8,14,11,0.62)';
+        ctx.lineWidth = 5;
+        ctx.stroke();
+        ctx.setLineDash([6, 5]);
+        ctx.strokeStyle = '#f4fbff';
+        ctx.lineWidth = 2.2;
         ctx.stroke();
         ctx.setLineDash([]);
         // Pulsing destination ring
@@ -4865,6 +5741,8 @@
         x: p.x, z: p.z, heading: p.heading, colorIdx: p.colorIdx, name: p.name, fleet: p.fleet
       }));
     },
+    getRoadPath: navPathToTarget,
+    getRouteLegs: navRouteLegs,
     getNextStop: function () {
       const st = game.nextStopIndex >= 0 ? BUS_STOPS[game.nextStopIndex] : null;
       return {

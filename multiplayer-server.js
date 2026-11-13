@@ -208,7 +208,8 @@ function handleWsMessage(client, rawText) {
       progress: +msg.progress || 0,
       ts: +msg.ts || Date.now()
     }, client.id);
-  } else if (msg.type === 'horn' || msg.type === 'modeStart') {
+  } else if (msg.type === 'horn' || msg.type === 'modeStart' || msg.type === 'chase') {
+    // 'chase' carries the rider/chaser round state, catches, votes and results.
     broadcastRoom(client.room, Object.assign({}, msg, { id: client.id, name: client.name }), client.id);
   } else if (msg.type === 'ping') {
     sendJson(client, { type: 'pong', ts: msg.ts });

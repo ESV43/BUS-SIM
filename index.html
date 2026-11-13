@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#0b1210">
 <title>IISER Vithura — Campus Drive · Shuttle &amp; Buggy Game</title>
-<meta name="description" content="Drive a real-scale IISER Vithura campus: GLB shuttle buses, student missions, traffic and up to 8-player co-op in the Western Ghats.">
+<meta name="description" content="Drive a real-scale IISER Vithura campus: GLB shuttle buses, student missions, time trials, parking tests, buggy safaris, traffic and up to 8-player co-op in the Western Ghats.">
 <link rel="stylesheet" href="css/style.css">
 </head>
 <body class="labels-key">
@@ -60,6 +60,11 @@
         <span class="veh-name">Open Buggy</span>
         <span class="veh-blurb">1.15 t · off-road campus runabout</span>
       </button>
+      <button class="veh-card" data-vehicle="auto" role="radio" aria-checked="false" type="button">
+        <span class="veh-icon veh-auto">A</span>
+        <span class="veh-name">Auto Rickshaw</span>
+        <span class="veh-blurb">0.72 t · three wheels, tight turning circle</span>
+      </button>
     </div>
     <div class="kicker menu-label">Game modes</div>
     <div class="mode-cards">
@@ -71,9 +76,25 @@
         <span class="mc-name">Mission</span>
         <span class="mc-blurb">Pick up students, run the route, collect fares</span>
       </button>
+      <button class="mode-card" data-game-mode="trial" type="button">
+        <span class="mc-name">Time Trial</span>
+        <span class="mc-blurb">Beat the clock — 8 checkpoints, best lap wins</span>
+      </button>
+      <button class="mode-card" data-game-mode="park" type="button">
+        <span class="mc-name">Precision Park</span>
+        <span class="mc-blurb">Thread the cones, park fully inside the bay</span>
+      </button>
+      <button class="mode-card" data-game-mode="safari" type="button">
+        <span class="mc-name">Buggy Safari</span>
+        <span class="mc-blurb">Off-road buggy trail to the hilltop checkpoints</span>
+      </button>
       <button class="mode-card" data-game-mode="multi" type="button">
         <span class="mc-name">Multiplayer</span>
         <span class="mc-blurb">Up to 8 drivers, one room code — cruise together</span>
+      </button>
+      <button class="mode-card" data-game-mode="chase" type="button">
+        <span class="mc-name">Chase</span>
+        <span class="mc-blurb">8P room: one rider runs fares, everyone else hunts</span>
       </button>
     </div>
     <div class="driving-rule-card">
@@ -174,7 +195,7 @@
   </div>
   <aside class="navmap-panel" id="navmap-panel">
     <div class="navmap-route-name" id="navmap-route-name">All shuttle routes</div>
-    <div class="navmap-route-count" id="navmap-route-count">4 routes · 16 stops</div>
+    <div class="navmap-route-count" id="navmap-route-count">4 routes · 21 stops</div>
     <div class="navmap-next" id="navmap-next">Next pickup: —</div>
     <ol class="navmap-stops" id="navmap-stops"></ol>
     <button class="btn primary wide" id="navmap-drive" type="button">Drive this route</button>
@@ -271,8 +292,8 @@
       </section>
       <section class="howto-step">
         <span class="howto-num">4</span>
-        <h3>Free Ride &amp; Multiplayer</h3>
-        <p>Free Ride ignores objectives — cruise anywhere and still pick up students. Multiplayer puts up to 8 drivers in one room code to cruise together.</p>
+        <h3>More modes</h3>
+        <p>Time Trial races the 8 stops against the clock, Precision Park tests your bay parking through a cone ring, and Buggy Safari runs the hilltop trail in the open buggy. Free Ride ignores objectives, and Multiplayer puts up to 8 drivers in one room code.</p>
       </section>
       <section class="howto-step">
         <span class="howto-num">5</span>

@@ -3592,12 +3592,25 @@
     navCtx.lineJoin = 'round';
     navCtx.lineCap = 'round';
     if (active) { navCtx.shadowColor = r.color; navCtx.shadowBlur = 10; }
+    const sg = window.ShuttleGame;
+    const legs = sg && sg.getRouteLegs ? sg.getRouteLegs(r.index) : null;
     navCtx.beginPath();
+    // Route legs follow the carriageway. The final leg loops back to stop 1.
     r.stops.forEach((st, i) => {
       const p = navWorldToScreen(st.x, st.z);
-      if (i === 0) navCtx.moveTo(p.x, p.y); else navCtx.lineTo(p.x, p.y);
+      navCtx.moveTo(p.x, p.y);
+      const leg = legs && legs[i];
+      if (leg && leg.length) {
+        for (let k = 0; k < leg.length; k++) {
+          const q = navWorldToScreen(leg[k][0], leg[k][1]);
+          navCtx.lineTo(q.x, q.y);
+        }
+      } else {
+        const nb = r.stops[(i + 1) % r.stops.length];
+        const q = navWorldToScreen(nb.x, nb.z);
+        navCtx.lineTo(q.x, q.y);
+      }
     });
-    navCtx.closePath();
     navCtx.stroke();
     if (active) {
       navCtx.shadowBlur = 0;
@@ -3697,12 +3710,26 @@
         navCtx.save();
         if (liveBus) {
           const bp = navWorldToScreen(liveBus.x, liveBus.z);
-          navCtx.setLineDash([6, 5]);
-          navCtx.strokeStyle = 'rgba(255,198,110,0.7)';
-          navCtx.lineWidth = 1.6;
           navCtx.beginPath();
           navCtx.moveTo(bp.x, bp.y);
-          navCtx.lineTo(np.x, np.y);
+          const guide = sgNext.getRoadPath
+            ? sgNext.getRoadPath(liveBus.x, liveBus.z, nextStop.x, nextStop.z)
+            : null;
+          if (guide && guide.length) {
+            for (let k = 0; k < guide.length; k++) {
+              const q = navWorldToScreen(guide[k][0], guide[k][1]);
+              navCtx.lineTo(q.x, q.y);
+            }
+          } else {
+            navCtx.lineTo(np.x, np.y);
+          }
+          navCtx.setLineDash([]);
+          navCtx.strokeStyle = 'rgba(8,14,11,0.62)';
+          navCtx.lineWidth = 5;
+          navCtx.stroke();
+          navCtx.setLineDash([6, 5]);
+          navCtx.strokeStyle = 'rgba(244,251,255,0.92)';
+          navCtx.lineWidth = 1.8;
           navCtx.stroke();
           navCtx.setLineDash([]);
         }
