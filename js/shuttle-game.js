@@ -66,7 +66,9 @@
   let gateYaw = 0;
   let gateBoomObstacle = null;
   let gateLampMat = null;
-  const gatePos = { x: 189.11, z: 551.92 };
+  // Main Gate position from OSM: 77.133262°E, 8.677921°N projected to scene coords.
+  // The OSM 'amenity=university' boundary centroid and road 0 starting point confirm this.
+  const gatePos = { x: 185.47, z: 548.84 };
   {
     const r0 = D.roads[0].pts;
     const pA = r0[Math.min(6, r0.length - 2)], pB = r0[Math.min(10, r0.length - 1)];
@@ -401,30 +403,33 @@
   const SPEED_CAMERA_LIMIT = 50 / 3.6;
   const FINE_AMOUNT = 150;
   const HIT_FINE = 50;
+  // Bus stop coordinates are snapped to nearest road in buildBusStopShelters().
+  // Positions below are approximate; the actual shelter placement uses roadInfoAt().
   const BUS_STOPS = [
-    { id: 'gate',         name: 'Main Gate Terminal',              x: 197.5,  z: 534.0,  heading:  0.48 },
+    // Core campus stops along the main road network
+    { id: 'gate',         name: 'Main Gate Terminal',              x: 185.5,  z: 548.8,  heading: -1.15 },
     { id: 'arcade',       name: 'Entrance Reception Arcade',       x: 251.5,  z: 461.0,  heading:  0.18 },
     { id: 'stadium',      name: 'Indoor Stadium & Sports Complex', x: 332.9,  z: 459.1,  heading: -0.72 },
     { id: 'anamudi',      name: 'Anamudi BS-MS Hostel',            x: 510.2,  z: 486.7,  heading:  1.31 },
     { id: 'hostels',      name: 'Hostels, CDH-I & Recreation',     x: 521.8,  z: 276.9,  heading: -2.20 },
     { id: 'qpark',        name: 'Q-Park & Cake World',             x: 434.2,  z: 138.0,  heading: -2.42 },
-    { id: 'library',      name: 'IISER Central Library',           x: 269.2,  z:  99.2,  heading:  1.09 },
-    { id: 'academic',     name: 'Academic Block, LHC & Science',   x: 342.9,  z: -54.4,  heading: -2.34 },
-    { id: 'vfr',          name: 'Visitors Forest Retreat',         x: 201.0,  z:  42.0,  heading:  3.10 },
-    { id: 'health',       name: 'Health Centre & Shopping Plaza',  x: 116.4,  z: -86.1,  heading: -2.05 },
-    { id: 'kathipara',    name: 'Kathipara Football Ground',       x: -104.0, z: -358.4, heading: -1.62 },
-    { id: 'quarters',     name: 'Faculty & Staff Quarters',        x: -466.1, z: -398.8, heading:  2.78 },
+    { id: 'library',      name: 'IISER Central Library',           x: 257.7,  z: 124.0,  heading:  1.09 },
+    { id: 'academic',     name: 'Academic Block, LHC & Science',   x: 308.0,  z: -10.1,  heading: -2.34 },
+    { id: 'vfr',          name: 'Visitors Forest Retreat',         x: 160.6,  z:  42.4,  heading:  3.10 },
+    { id: 'health',       name: 'Health Centre & Shopping Plaza',  x: 116.5,  z: -70.5,  heading: -2.05 },
+    { id: 'kathipara',    name: 'Kathipara Football Ground',       x: -131.7, z: -435.1, heading: -1.62 },
+    { id: 'quarters',     name: 'Faculty & Staff Quarters',        x: -376.7, z: -400.1, heading:  2.78 },
     // Exterior SH-45 Vithura–Ponmudi Highway Stops (Outside Main Gate!)
     { id: 'sh45_gate',    name: 'SH-45 Main Gate Highway Jn',      x: 145.0,  z: 556.0,  heading: -1.96 },
     { id: 'vithura_fuel', name: 'Vithura Fuel & KSRTC Stand',      x: -125.0, z: 604.5,  heading: -1.45 },
     { id: 'golden_valley',name: 'Golden Valley Ghat Viewpoint',    x: 416.0,  z: 777.0,  heading:  1.15 },
     { id: 'vithura_west', name: 'Vithura Town West Highway',       x: -485.0, z: 668.0,  heading: -1.72 },
     // Infill stops added along the internal road network (snapped to the road in buildBusStopShelters)
-    { id: 'instr',        name: 'Central Instrumentation & Biology', x:  671.0, z:   76.5, heading:  1.20 },
-    { id: 'director',     name: "Director's Building & Admin Circle",x: -269.4, z: -439.1, heading:  0.40 },
-    { id: 'plaza',        name: 'Shopping Lane & CDH-III',           x:   83.3, z: -258.6, heading: -1.40 },
-    { id: 'sispara',      name: 'Sispara & PhD Hostel Block 6',      x:  335.1, z:  282.9, heading:  1.00 },
-    { id: 'ankita',       name: 'Ankita Dhaba & North Gate Link',    x:  306.6, z:  656.6, heading: -1.90 }
+    { id: 'instr',        name: 'Central Instrumentation & Biology', x:  680.1, z: 177.4, heading:  1.20 },
+    { id: 'director',     name: "Director's Building & Admin Circle",x: -376.7, z: -400.1, heading:  0.40 },
+    { id: 'plaza',        name: 'Shopping Lane & CDH-III',           x:  124.4, z: -135.9, heading: -1.40 },
+    { id: 'sispara',      name: 'Sispara & PhD Hostel Block 6',      x:  428.6, z: 311.1, heading:  1.00 },
+    { id: 'ankita',       name: 'Ankita Dhaba & North Gate Link',    x:  301.7, z: 638.3, heading: -1.90 }
   ];
 
   // ---------- Distance-based fare model ----------
@@ -449,13 +454,16 @@
     return to === fromIdx ? (fromIdx + 1) % n : to;
   }
 
+  // Shuttle routes along the real IISER TVM campus road network.
+  // Stops are indexed into BUS_STOPS above; the road network is rebuilt
+  // each frame from CAMPUS_DATA.roads so routes follow actual paved roads.
   const ROUTES = [
-    { id: '101', name: 'Route 101 · Main Campus Express',        stops: [0, 1, 2, 3, 4, 19, 5, 16, 6, 7],
-      estMinutes: 24, schedule: '06:30 – 21:30 · every 20 min' },
-    { id: '202', name: 'Route 202 · Medical, VFR & Shops',       stops: [0, 6, 8, 9, 18, 7, 5, 4, 19],
-      estMinutes: 20, schedule: '07:00 – 21:00 · every 25 min' },
-    { id: '303', name: 'Route 303 · Western Hilltop Climb',      stops: [7, 9, 18, 10, 17, 11, 17, 10, 8, 6],
-      estMinutes: 28, schedule: '06:45 – 20:45 · every 30 min' },
+    { id: '101', name: 'Route 101 · Main Campus Express',        stops: [0, 1, 2, 3, 4, 5, 6, 7],
+      estMinutes: 22, schedule: '06:30 – 21:30 · every 20 min' },
+    { id: '202', name: 'Route 202 · Medical, VFR & Shops',       stops: [0, 8, 9, 18, 7, 5, 19],
+      estMinutes: 18, schedule: '07:00 – 21:00 · every 25 min' },
+    { id: '303', name: 'Route 303 · Western Hilltop Climb',      stops: [7, 17, 11, 10, 8, 6, 5],
+      estMinutes: 26, schedule: '06:45 – 20:45 · every 30 min' },
     { id: '404', name: 'Route 404 · SH-45 Vithura–Ponmudi Hwy',  stops: [0, 20, 12, 13, 15, 13, 12, 14, 12, 1, 2],
       estMinutes: 34, schedule: '06:00 – 22:00 · every 40 min' }
   ];

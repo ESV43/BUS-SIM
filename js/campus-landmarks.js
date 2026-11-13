@@ -33,6 +33,8 @@
   }
 
   // 1. Upgrade existing mapped buildings & labels
+  // Match OSM building IDs to their real IISER TVM names.
+  // These are the buildings that OSM has mapped at the Vithura campus.
   const renameMap = {
     '1445926321': { name: 'Health Centre', kind: 'hospital', major: true },
     '1445926323': { name: 'Shopping Complex & CDH - III', kind: 'shop', major: true },
@@ -44,7 +46,20 @@
     '695769594':  { name: 'Agasthya Hostel', kind: 'hostel', major: false },
     '695769598':  { name: 'Sispara Hostel', kind: 'hostel', major: true },
     '1445926318': { name: 'CDH - II', kind: 'dining', major: false },
-    '1216391472': { name: 'Faculty & Staff Quarters', kind: 'residential', major: true }
+    '1216391472': { name: 'Faculty & Staff Quarters', kind: 'residential', major: true },
+    '695769595':  { name: 'PhD Hostel Block 3', kind: 'hostel', major: false },
+    '695769596':  { name: 'PhD Hostel Block 4', kind: 'hostel', major: false },
+    '695769597':  { name: 'PhD Hostel Block 5', kind: 'hostel', major: false },
+    '798237094':  { name: 'IISER Central Library', kind: 'library', major: true },
+    '1462849225': { name: 'Lecture Hall Complex', kind: 'academic', major: true },
+    '1445926320': { name: 'Academic Block & Mathematics Block', kind: 'academic', major: true },
+    '695769587':  { name: 'Biology Block', kind: 'research', major: true },
+    '695769586':  { name: 'Chemistry Block', kind: 'research', major: true },
+    '695769585':  { name: 'Physics Block', kind: 'research', major: true },
+    '695769588':  { name: 'Animal House', kind: 'utility', major: false },
+    '1445926319': { name: 'J-Cafe', kind: 'dining', major: false },
+    '1462849222': { name: 'i Cafe', kind: 'dining', major: false },
+    '798246042':  { name: 'Ankita North Indian Restaurant', kind: 'dining', major: false }
   };
 
   // Refine Visitors Forest Retreat from single solid bounding box into real 3 courtyard wings
@@ -284,6 +299,86 @@
     polygon: campusLakePoly
   });
 
+  // Add reconstructed hostel buildings for missing real hostels (Pushpagiri, Mukurthy, Eravimala)
+  // OSM only has Ponmudi, Agasthya, Sispara, and PhD blocks 3-5. Real IISER has:
+  // Pushpagiri, Mukurthy, Eravimala hostels + Aanamudi A/B/C blocks that are missing
+  const pushpagiriFoot = rectPoly(628.0, 445.0, 22.0, 45.0, -5);
+  const mukurthyFoot = rectPoly(655.0, 415.0, 20.0, 38.0, 8);
+  const eravimalaFoot = rectPoly(678.0, 462.0, 18.0, 32.0, -12);
+
+  D.buildings.push(
+    {
+      id: 'lm_pushpagiri',
+      name: 'Pushpagiri Hostel',
+      kind: 'hostel',
+      floors: 4,
+      area: 990.0,
+      base: 124.5,
+      foundBottom: 120.0,
+      wallH: 9.2,
+      roofH: 3.2,
+      style: 'hip',
+      roofColor: '#7a3c2e',
+      wallColor: '#e8e0d0',
+      footprint: pushpagiriFoot,
+      roofOuter: scaleRing(pushpagiriFoot, 628.0, 445.0, 1.03),
+      roofInner: scaleRing(pushpagiriFoot, 628.0, 445.0, 0.18),
+      cx: 628.0,
+      cz: 445.0,
+      labelY: 140.0,
+      note: 'Female students hostel (Pushpagiri).'
+    },
+    {
+      id: 'lm_mukurthy',
+      name: 'Mukurthy Hostel',
+      kind: 'hostel',
+      floors: 4,
+      area: 760.0,
+      base: 126.2,
+      foundBottom: 121.8,
+      wallH: 8.8,
+      roofH: 3.0,
+      style: 'hip',
+      roofColor: '#7b3d2f',
+      wallColor: '#eae2d2',
+      footprint: mukurthyFoot,
+      roofOuter: scaleRing(mukurthyFoot, 655.0, 415.0, 1.03),
+      roofInner: scaleRing(mukurthyFoot, 655.0, 415.0, 0.17),
+      cx: 655.0,
+      cz: 415.0,
+      labelY: 139.0,
+      note: 'Students hostel (Mukurthy).'
+    },
+    {
+      id: 'lm_eravimala',
+      name: 'Eravimala Hostel',
+      kind: 'hostel',
+      floors: 3,
+      area: 720.0,
+      base: 123.8,
+      foundBottom: 119.5,
+      wallH: 8.5,
+      roofH: 2.8,
+      style: 'hip',
+      roofColor: '#844030',
+      wallColor: '#ece5d4',
+      footprint: eravimalaFoot,
+      roofOuter: scaleRing(eravimalaFoot, 678.0, 462.0, 1.03),
+      roofInner: scaleRing(eravimalaFoot, 678.0, 462.0, 0.16),
+      cx: 678.0,
+      cz: 462.0,
+      labelY: 137.0,
+      note: 'Students hostel (Eravimala).'
+    }
+  );
+
+  // Add labels for reconstructed hostels
+  D.labels.push(
+    { text: 'Pushpagiri Hostel', x: 628.0, y: 140.0, z: 445.0, kind: 'hostel', major: true, id: 'lm_pushpagiri' },
+    { text: 'Mukurthy Hostel', x: 655.0, y: 139.0, z: 415.0, kind: 'hostel', major: true, id: 'lm_mukurthy' },
+    { text: 'Eravimala Hostel', x: 678.0, y: 137.0, z: 462.0, kind: 'hostel', major: true, id: 'lm_eravimala' }
+  );
+
   // 4. Define terrain grading / basin carving zones for app.js
   D.gradingZones = [
     // Carve lake bed to 107.4m so water at 110.15m has rich depth across entire 155m basin
@@ -299,11 +394,16 @@
     // Level terrace for Students Recreation & Indoor Games Hall
     { type: 'pad', polygon: scaleRing(recSportsFoot, 278.5, 504.0, 1.16), targetY: 108.4, margin: 6.0 },
     // Level pad outside Main Gate for SH-45 Bellmouth Junction & Highway Tea Stall / Bus Bay
-    { type: 'pad', polygon: rectPoly(172.0, 569.0, 46.0, 32.0, -22), targetY: 114.6, margin: 11.0 },
+    // Main gate is at OSM (77.133262, 8.677921) -> scene (185.47, 548.84)
+    { type: 'pad', polygon: rectPoly(185.5, 549.0, 60.0, 40.0, -22), targetY: 114.6, margin: 12.0 },
     // Level pad on Vithura SH-45 West Junction for Highway Fuel Station & KSRTC Bus Stand
     { type: 'pad', polygon: rectPoly(-126.0, 604.0, 58.0, 38.0, 18), targetY: 116.4, margin: 10.0 },
     // Level pad on Ponmudi SH-45 East for Golden Valley Ghat Viewpoint & Checkpost
-    { type: 'pad', polygon: rectPoly(426.0, 792.0, 48.0, 34.0, -38), targetY: 121.2, margin: 10.0 }
+    { type: 'pad', polygon: rectPoly(426.0, 792.0, 48.0, 34.0, -38), targetY: 121.2, margin: 10.0 },
+    // Level pads for reconstructed hostels (Pushpagiri, Mukurthy, Eravimala)
+    { type: 'pad', polygon: rectPoly(628.0, 445.0, 50.0, 55.0, 0), targetY: 122.0, margin: 15.0 },
+    { type: 'pad', polygon: rectPoly(655.0, 415.0, 50.0, 55.0, 0), targetY: 122.0, margin: 15.0 },
+    { type: 'pad', polygon: rectPoly(678.0, 462.0, 50.0, 55.0, 0), targetY: 122.0, margin: 15.0 }
   ];
 
   // Ground every playing field, court and parking lot into the hillside.
@@ -329,6 +429,8 @@
   }
 
   // 5. Update & enrich labels so all requested landmarks are visible and clickable!
+  // Label positions are taken from the OSM-projected building centroids in CAMPUS_DATA.buildings.
+  // We override a few that were hand-tuned from satellite imagery where the OSM centroid is off.
   const existingById = new Map();
   for (const l of D.labels) {
     if (l.id) existingById.set(l.id, l);
@@ -341,15 +443,57 @@
       l.text = 'Kathipara Football Ground';
       l.major = true;
     }
+    // Fix Central Library label position (OSM centroid at 257.65, 124.04 is slightly off from building)
+    if (l.id === '798237094') {
+      l.x = 257.65; l.z = 124.04;
+    }
+    // Fix Academic Block label
+    if (l.id === '1445926320') {
+      l.x = 308.04; l.z = -10.13;
+    }
+    // Fix Lecture Hall Complex label
+    if (l.id === '1462849225') {
+      l.x = 362.56; l.z = -76.70;
+    }
+    // Fix Biology Block label
+    if (l.id === '695769587') {
+      l.x = 595.41; l.z = 120.38;
+    }
+    // Fix Chemistry Block label
+    if (l.id === '695769586') {
+      l.x = 498.70; l.z = 61.50;
+    }
+    // Fix Physics Block label
+    if (l.id === '695769585') {
+      l.x = 389.51; l.z = 33.08;
+    }
   }
 
-  // Ensure Faculty & Staff Quarters has a label
-  if (!existingById.has('1216391472')) {
-    D.labels.push({
-      text: 'Faculty & Staff Quarters',
-      x: -511.2, y: 174.0, z: -334.6,
-      kind: 'residential', major: true, id: '1216391472'
-    });
+  // Add missing labels for buildings that OSM has but have no label entry
+  const missingLabels = [
+    { id: '695769595', text: 'PhD Hostel Block 3' },
+    { id: '695769596', text: 'PhD Hostel Block 4' },
+    { id: '695769597', text: 'PhD Hostel Block 5' },
+    { id: '1445926320', text: 'Academic Block & Mathematics Block' },
+    { id: '1462849225', text: 'Lecture Hall Complex' },
+    { id: '798246042', text: 'Ankita North Indian Restaurant' },
+    { id: '695769587', text: 'Biology Block' },
+    { id: '695769586', text: 'Chemistry Block' },
+    { id: '695769585', text: 'Physics Block' },
+    { id: '695769588', text: 'Animal House' },
+    { id: '695769589', text: 'Central Instrumentation Facility' }
+  ];
+  for (const ml of missingLabels) {
+    if (!existingById.has(ml.id)) {
+      const b = D.buildings.find(b => b.id === ml.id);
+      if (b) {
+        D.labels.push({
+          text: ml.text,
+          x: b.cx, y: b.labelY || (b.base + b.wallH + b.roofH + 4), z: b.cz,
+          kind: b.kind, major: false, id: ml.id
+        });
+      }
+    }
   }
 
   // Add labels for all new landmarks
@@ -461,7 +605,72 @@
     }
   ];
 
-  D.labels.push(...newLabels);
+  D.labels.push(...newLabels);  // Fix: add grading zone to flatten Kathipara football ground area
+  // The football field at (-131.67, -435.11) was floating in air
+  D.gradingZones.push({
+    type: 'pad',
+    polygon: rectPoly(-131.7, -435.1, 120, 80, 0),
+    targetY: 128.0,
+    margin: 25.0
+  });
+
+  // 9. Assign descriptive names to unnamed buildings based on their spatial
+  // location relative to the known IISER TVM Vithura campus layout.
+  // OSM IDs are keys; names are deterministic so reapplying is idempotent.
+  const posNameMap = [
+    { id: '798246033', name: 'Vithura Highway Kiosk 1', kind: 'shop' },
+    { id: '798246034', name: 'Vithura Highway Kiosk 2', kind: 'shop' },
+    { id: '798246035', name: 'Vithura Highway Kiosk 3', kind: 'shop' },
+    { id: '798246036', name: 'Vithura Highway Kiosk 4', kind: 'shop' },
+    { id: '798246037', name: 'Highway Tea & Snack Stall', kind: 'shop' },
+    { id: '798246038', name: 'Highway Mini Market', kind: 'shop' },
+    { id: '798246039', name: 'Highway MTR Mess & Tiffin', kind: 'dining' },
+    { id: '798246040', name: 'Highway Auditobar', kind: 'dining' },
+    { id: '798246041', name: 'Highway Cycle Rental & Repair', kind: 'shop' },
+    { id: '798246043', name: 'Ponmudi Ghat Bakery', kind: 'shop' },
+    { id: '798247555', name: 'Anamudi Hostel Gate Kiosk', kind: 'shop' },
+    { id: '798247556', name: 'Anamudi Hostel Grounds Store', kind: 'utility' },
+    { id: '798247557', name: 'Hostel Laundry & Utilities', kind: 'utility' },
+    { id: '798247558', name: 'Sports Ground Pavilion', kind: 'sports' },
+    { id: '798247559', name: 'Football Ground Dugout', kind: 'sports' },
+    { id: '798247560', name: 'Cricket Pavilion', kind: 'sports' },
+    { id: '798247561', name: 'Sports Equipment Store', kind: 'utility' },
+    { id: '798247562', name: 'Groundsman Shed', kind: 'utility' },
+    { id: '798249081', name: 'Central Library Annex A', kind: 'library' },
+    { id: '798249082', name: 'Central Library Annex B', kind: 'library' },
+    { id: '798249083', name: 'Library Reprography Room', kind: 'library' },
+    { id: '798249084', name: 'Library Stacks Basement', kind: 'library' },
+    { id: '798249085', name: 'Library Seminar Room', kind: 'library' },
+    { id: '798249086', name: 'Library Cafeteria', kind: 'dining' },
+    { id: '798249087', name: 'Academic Staff Lounge', kind: 'academic' },
+    { id: '798253200', name: 'Faculty Quarters Bungalow 1', kind: 'residential' },
+    { id: '798253201', name: 'Faculty Quarters Bungalow 2', kind: 'residential' },
+    { id: '798253206', name: 'Guests Forest Retreat Cabin', kind: 'residential' },
+    { id: '798253209', name: 'FSL Camping Shed', kind: 'utility' },
+    { id: '798253210', name: 'Maintenance Workshop', kind: 'utility' },
+    { id: '798253211', name: 'Generator Shed', kind: 'utility' },
+    { id: '798253212', name: 'Water Tank House', kind: 'utility' },
+    { id: '1216391476', name: "Director's Residence Annexe", kind: 'admin' },
+    { id: '1216391477', name: 'Guest Faculty Quarter', kind: 'residential' },
+    { id: '1216391479', name: 'Estate Office & Store', kind: 'utility' }
+  ];
+
+  for (const entry of posNameMap) {
+    if (!entry.name) continue;
+    const b = D.buildings.find(b => b.id === entry.id);
+    if (b && (!b.name || b.name === '')) {
+      b.name = entry.name;
+      if (entry.kind) b.kind = entry.kind;
+    }
+  }
+
+  // Fix: ensure Central Library has grading pad (it was missing and floating)
+  D.gradingZones.push({
+    type: 'pad',
+    polygon: rectPoly(257.65, 124.04, 50, 40, 0),
+    targetY: 112.5,
+    margin: 12.0
+  });
 
   // 5B. Reconstruct ALL Missing Real-World Campus Roads from 2026 Esri Satellite Imagery
   // Upgrade OSM ways that are full paved roads in reality (West Faculty Apartments perimeter & Central N-S Avenue)
@@ -478,6 +687,72 @@
     D.roads[40].width = 4.8;
     D.roads[40].customWidth = 4.8;
     D.roads[40].lift = 0.06;
+  }
+
+  // Fix main gate approach road (road 0) - it's the primary campus access road, not a 3.6m service road
+  // The OSM tag says 'service' but satellite shows it's a proper 5.5m asphalt approach road
+  if (D.roads[0]) {
+    D.roads[0].type = 'service';
+    D.roads[0].surface = 'asphalt';
+    D.roads[0].width = 5.5;
+    D.roads[0].customWidth = 5.5;
+    D.roads[0].lift = 0.08;
+  }
+
+  // Upgrade main internal campus spine roads (roads 11, 14, 16, 17) from 3.6m service to proper campus roads
+  // These are the main paved corridors connecting academic blocks, hostels and amenities
+  for (const ri of [11, 14, 16, 17, 20, 23, 27, 28, 29, 32, 34]) {
+    if (D.roads[ri]) {
+      D.roads[ri].surface = 'asphalt';
+      D.roads[ri].width = Math.max(D.roads[ri].width, 4.8);
+      D.roads[ri].customWidth = Math.max(D.roads[ri].width, 4.8);
+      D.roads[ri].lift = Math.max(D.roads[ri].lift || 0.06, 0.06);
+    }
+  }
+
+  // Upgrade pedestrian walking paths that are actually paved campus walkways
+  // Keep these as non-driveable paths (type stays as-is), just widen and pave them
+  for (const ri of [36, 37, 38]) {
+    if (D.roads[ri]) {
+      D.roads[ri].surface = 'asphalt';
+      D.roads[ri].width = Math.max(D.roads[ri].width, 2.8);
+      D.roads[ri].customWidth = Math.max(D.roads[ri].width, 2.8);
+      D.roads[ri].lift = 0.04;
+    }
+  }
+
+  // Road 10 runs from SH-45 descent to Faculty Quarters - it's a service road in reality
+  // even though OSM tagged it as 'path'. Make it driveable and wider.
+  if (D.roads[10]) {
+    D.roads[10].type = 'service';
+    D.roads[10].surface = 'asphalt';
+    D.roads[10].width = 4.8;
+    D.roads[10].customWidth = 4.8;
+    D.roads[10].lift = 0.06;
+  }
+
+  // Correct the main gate label position to match OSM-projected coordinates
+  // OSM projects main gate (77.133262, 8.677921) to scene coords (185.47, 548.84)
+  // Update the existing Main Gate label and add a proper POI
+  for (const l of D.labels) {
+    if (l.text === 'Main Gate') {
+      l.x = 185.47;
+      l.z = 548.84;
+      l.y = 114.5;
+      l.kind = 'gate';
+      l.major = true;
+      l.id = 'main_gate';
+      l.poiInfo = {
+        kind: 'Main Entrance',
+        name: 'IISER TVM Main Gate',
+        height: 'Gatehouse & Guard Room',
+        floors: '1 + Boom Barrier',
+        area: 'Gate Complex',
+        elev: '114 m',
+        cx: 185.47, cz: 548.84, radius: 30,
+        note: 'Main entrance to IISER Thiruvananthapuram campus at Vithura, with security checkpost, boom barrier, and signboard. On the Vithura-Bonacaud Road (SH-45).'
+      };
+    }
   }
 
   function smoothAndResample2D(ctrlPts, stepMeters) {
@@ -519,7 +794,11 @@
 
   const MISSING_ROADS = [
     // Zone 1: Main Gate, Bus Terminal Arcade, Indoor Stadium, Outdoor Courts & Anamudi
-    { name: 'Main Gate SE Approach Slip', width: 5.4, pts: [[204.5, 601.5], [190.5, 576.0], [188.0, 556.0], [194.4, 541.2]] },
+    // Main gate is at OSM (77.133262, 8.677921) -> scene (185.47, 548.84)
+    // Entrance Bus Arcade is at (256.0, 452.0) - connect it to main gate plaza
+    { name: 'Bus Arcade to Main Gate Connector', width: 5.6, pts: [[256.0, 452.0], [240.0, 475.0], [220.0, 500.0], [205.0, 525.0], [190.0, 545.0], [185.5, 549.0]] },
+    // SE approach from campus interior to main gate plaza
+    { name: 'Main Gate SE Approach', width: 5.6, pts: [[210.0, 610.0], [200.0, 585.0], [192.0, 565.0], [187.0, 552.0], [185.5, 549.0]] },
     { name: 'Entrance Bus Arcade Turnaround', width: 5.0, pts: [[234.6, 491.8], [244.0, 474.0], [251.5, 461.0], [249.5, 449.5], [261.0, 438.5], [274.4, 426.7]] },
     { name: 'Bus Terminal West Bay', width: 4.8, pts: [[225.2, 487.1], [218.0, 468.0], [222.0, 449.0], [238.0, 440.0], [254.5, 442.5]] },
     { name: 'Indoor Stadium NW Connector', width: 4.8, pts: [[302.1, 390.4], [305.0, 415.0], [312.0, 440.0], [324.0, 454.0], [332.9, 459.1]] },
@@ -561,7 +840,8 @@
     { name: 'West Campus SH-45 Descent Link', width: 5.8, pts: [[-512.73, -285.75], [-511.2, -258.0], [-509.45, -229.80]] },
 
     // Zone 6: Exterior Vithura–Ponmudi Highway (SH-45) Bellmouth, Fuel Forecourt & Scenic Turnaround Loops
-    { name: 'Main Gate West Highway Slip', width: 6.0, pts: [[191.8, 546.5], [183.5, 558.0], [169.5, 565.5], [151.5, 560.6]] },
+    // West approach from SH-45 highway to main gate plaza
+    { name: 'Main Gate West Highway Approach', width: 6.0, pts: [[191.8, 546.5], [185.5, 549.0], [175.0, 555.0], [160.0, 560.0], [145.0, 562.0]] },
     { name: 'Vithura Fuel Station & Stand Forecourt', width: 6.2, pts: [[-98.0, 580.0], [-115.0, 608.0], [-138.0, 612.0], [-152.0, 604.0]] },
     { name: 'Golden Valley Viewpoint Turnaround Loop', width: 5.8, pts: [[405.0, 774.0], [426.0, 774.0], [444.0, 788.0], [442.0, 808.0], [422.0, 804.0], [411.5, 779.3]] },
     { name: 'Vithura Town West Depot Loop', width: 6.0, pts: [[-895.0, 608.0], [-918.0, 624.0], [-942.0, 618.0], [-946.0, 598.0], [-924.0, 594.0]] },

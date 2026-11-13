@@ -2,10 +2,37 @@
 (function () {
   'use strict';
 
+  window.addEventListener('error', (e) => {
+    console.error('Script error:', {
+      message: e.message,
+      filename: e.filename,
+      lineno: e.lineno,
+      colno: e.colno,
+      error: e.error ? Object.getOwnPropertyNames(e.error).join(', ') : 'no error object'
+    });
+    let msg = e.message || 'Unknown script error';
+    if (e.filename) msg += ' (' + e.filename + ':' + e.lineno + ')';
+    console.error(msg);
+    const el = document.getElementById('error');
+    if (el) { el.textContent = msg; el.classList.remove('hidden'); }
+    const loading = document.getElementById('loading');
+    if (loading) loading.classList.add('done');
+  });
+  window.addEventListener('unhandledrejection', (e) => {
+    console.error('Unhandled promise rejection:', e.reason);
+    const el = document.getElementById('error');
+    if (el) { el.textContent = 'Promise error: ' + (e.reason && e.reason.message ? e.reason.message : String(e.reason)); el.classList.remove('hidden'); }
+    const loading = document.getElementById('loading');
+    if (loading) loading.classList.add('done');
+  });
+
   const D = window.CAMPUS_DATA;
   const SAT_URI = window.CAMPUS_SATELLITE_URI;
   const T = window.THREE;
-  if (!D || !SAT_URI || !T) { fail('The campus data could not be loaded.'); return; }
+  console.log('App: D=' + !!D + ' SAT_URI=' + (SAT_URI ? SAT_URI.substring(0,30) + '...' : 'null') + ' T=' + !!T);
+  if (!D) { fail('The campus data could not be loaded.'); return; }
+  if (!SAT_URI) { fail('The satellite imagery could not be loaded.'); return; }
+  if (!T) { fail('Three.js could not be loaded.'); return; }
   if (T.ColorManagement) T.ColorManagement.legacyMode = false;
 
   const M = D.meta;
@@ -13,6 +40,9 @@
   const GW = M.ground[0], GH = M.ground[1];
   const MPP = M.mpp;
   const WORLD = Math.pow(2, M.zoom) * 256;
+  // Quality tier: 'low' disables shadows for performance, 'high' enables full shadows
+  const qualityTier = window.QUALITY_TIER || (typeof navigator !== 'undefined' && navigator.hardwareConcurrency <= 4 ? 'low' : 'high');
+  console.log('App: qualityTier =', qualityTier);
   const latC = M.centerLatLon[0], lonC = M.centerLatLon[1];
   const gxC = (lonC + 180) / 360 * WORLD;
   const gyC = (1 - Math.asinh(Math.tan(latC * Math.PI / 180)) / Math.PI) / 2 * WORLD;
@@ -40,7 +70,19 @@
     return out;
   }
 
-  const heightValues = b64ToFloatHeights(HM.b64);
+  let heightValues;
+  try {
+    console.log('App: Decoding heightmap...');
+    heightValues = b64ToFloatHeights(HM.b64);
+    console.log('App: Heightmap decoded:', heightValues.length, 'values');
+  } catch (e) {
+    console.error('Heightmap decode error:', e);
+    const el = document.getElementById('error');
+    if (el) { el.textContent = 'Terrain data error: ' + e.message; el.classList.remove('hidden'); }
+    const loading = document.getElementById('loading');
+    if (loading) loading.classList.add('done');
+    return;
+  }
 
   // Piecewise-triangular interpolation matching the terrain mesh's diagonal (b-c) exactly,
   // so roads/props/bus sit ON the rendered surface instead of floating above or sinking in.
@@ -211,16 +253,23 @@
     }
   }
 
+  console.log('App: Processing grading zones...');
   // Carve lake basins & level terraces into heightmap BEFORE building terrain & road meshes
   if (Array.isArray(D.gradingZones)) {
+    let zoneCount = 0;
     for (const gz of D.gradingZones) {
+      if (!gz || !gz.polygon || !Array.isArray(gz.polygon) || gz.polygon.length < 3) continue;
       const poly = gz.polygon;
       let minX = 1e9, maxX = -1e9, minZ = 1e9, maxZ = -1e9;
       for (const p of poly) {
+        if (!Array.isArray(p) || p.length < 2) continue;
         if (p[0] < minX) minX = p[0]; if (p[0] > maxX) maxX = p[0];
         if (p[1] < minZ) minZ = p[1]; if (p[1] > maxZ) maxZ = p[1];
       }
+      if (minX > maxX || minZ > maxZ) continue;
+      zoneCount++;
       const m = gz.margin || 8.0;
+      if (zoneCount % 5 === 0) console.log('App: Processed', zoneCount, 'grading zones...');
       const i0 = clamp(Math.floor((minX - m - HM.x0) / HM.dx), 0, HM.nx - 1);
       const i1 = clamp(Math.ceil((maxX + m - HM.x0) / HM.dx), 0, HM.nx - 1);
       const j0 = clamp(Math.floor((minZ - m - HM.z0) / HM.dz), 0, HM.nz - 1);
@@ -2691,7 +2740,22 @@
     }
 
     // 3. Plant signature Avenue Royal/Coconut Palms & Lush Roadside Shrubs/Ferns/Laterite Boulders along campus & exterior SH-45 roads!
-    for (let ri = 0; ri < D.roads.length; ri++) {
+    // Solid building footprints so the bus can't drive through structures.
+  for (const b of Object.values(D.buildings)) {
+    if (!b || !b.footprint || b.footprint.length < 3) continue;
+    let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+    for (const pt of b.footprint) {
+      if (pt[0] < minX) minX = pt[0];
+      if (pt[0] > maxX) maxX = pt[0];
+      if (pt[1] < minZ) minZ = pt[1];
+      if (pt[1] > maxZ) maxZ = pt[1];
+    }
+    if (!isFinite(minX)) continue;
+    solidObstacles.push({ type: 'poly', ring: b.footprint, label: b.name || 'Building' });
+    b.polyBBox = { minX, maxX, minZ, maxZ };
+  }
+
+  for (let ri = 0; ri < D.roads.length; ri++) {
       const r = D.roads[ri];
       if (!r || !r.isDriveable || ri === 15 || !r.pts) continue;
       let acc = 0;
@@ -2905,16 +2969,40 @@
   terrainMat.needsUpdate = true;
 
   function onSat() {
-    satImage = satTex.image;
-    populateRealisticVegetation(satImage);
-    renderer.shadowMap.needsUpdate = true;
-    buildMinimapBase();
+    try {
+      satImage = satTex.image;
+      populateRealisticVegetation(satImage);
+      renderer.shadowMap.needsUpdate = true;
+      buildMinimapBase();
+    } catch (e) {
+      console.error('onSat error:', e);
+      const el = document.getElementById('error');
+      if (el) { el.textContent = 'Loading error: ' + e.message; el.classList.remove('hidden'); }
+    }
     const loading = document.getElementById('loading');
-    requestAnimationFrame(() => {
-      if (loading) loading.classList.add('done');
-    });
+    if (loading) loading.classList.add('done');
   }
-  if (satTex.image && satTex.image.width) onSat();
+  // For data URIs, the image may already be loaded. Check immediately.
+  if (satTex.image && satTex.image.width) {
+    onSat();
+  } else {
+    // Fallback: data URIs should load instantly. If image isn't ready after 50ms,
+    // force-complete the loading sequence so the game doesn't hang.
+    const fallbackTimer = setTimeout(() => {
+      if (!satTex.image || !satTex.image.width) {
+        // Create a minimal fallback image so the game can start
+        const canvas = document.createElement('canvas');
+        canvas.width = 2; canvas.height = 2;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#556b2f';
+        ctx.fillRect(0, 0, 2, 2);
+        satTex.image = canvas;
+        satImage = canvas;
+        onSat();
+      }
+    }, 50);
+    satTex.onload = () => { clearTimeout(fallbackTimer); };
+  }
 
   const selectionRing = new T.Mesh(
     new T.RingGeometry(0.955, 1.0, 64),
