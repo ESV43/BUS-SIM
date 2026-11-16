@@ -29,7 +29,6 @@
   const D = window.CAMPUS_DATA;
   const SAT_URI = window.CAMPUS_SATELLITE_URI;
   const T = window.THREE;
-  console.log('App: D=' + !!D + ' SAT_URI=' + (SAT_URI ? SAT_URI.substring(0,30) + '...' : 'null') + ' T=' + !!T);
   if (!D) { fail('The campus data could not be loaded.'); return; }
   if (!SAT_URI) { fail('The satellite imagery could not be loaded.'); return; }
   if (!T) { fail('Three.js could not be loaded.'); return; }

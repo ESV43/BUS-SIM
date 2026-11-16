@@ -1,14 +1,21 @@
 /* IISER Thiruvananthapuram — 3D GLB Campus & SH-45 Highway Bus Simulator
  * Real .GLB Transit/Coach/College Fleet, 7-Mode Multi-Camera System,
  * Impermeable Spatial-Hashed Multi-Disc Solid Collisions, Exterior SH-45 Highway,
- * 6 Game Modes (Free Ride, Mission, Time Trial, Precision Park, Buggy Safari,
- * 8-Player Co-op) with BroadcastChannel + WebSocket. */
+ * 7 Game Modes (Free Ride, Mission, Time Trial, Precision Park, Buggy Safari,
+ * 8-Player Co-op, Chase) with BroadcastChannel + WebSocket. */
 (function () {
   'use strict';
 
   const T = window.THREE;
   const W = window.CampusWorld || window.__dbg;
+  const LOGIC = window.IISERLogic;
   if (!T || !W) return;
+  if (!LOGIC) {
+    // Fares, comfort grading and route sampling live in js/game-logic.js so
+    // they can be unit tested without a browser.
+    console.error('Shuttle game: load js/game-logic.js before js/shuttle-game.js.');
+    return;
+  }
   const touchInput = !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
 
   const {
@@ -460,26 +467,17 @@
     { id: 'ankita',       name: 'Ankita Dhaba & North Gate Link',    x:  301.7, z: 638.3, heading: -1.90 }
   ];
 
-  // ---------- Distance-based fare model ----------
-  // ₹10 flag fall plus ₹15 per kilometre of the passenger's own trip.
-  const FARE_BASE = 10;
-  const FARE_PER_KM = 15;
+  // ---------- Distance-based fare model (rules live in js/game-logic.js) ----------
   const BUS_CAPACITY = 46; // seats + standing on the transit bus
   function stopDistance(fromIdx, toIdx) {
-    const a = BUS_STOPS[fromIdx], b = BUS_STOPS[toIdx];
-    return Math.hypot(b.x - a.x, b.z - a.z);
+    return LOGIC.stopDistance(BUS_STOPS, fromIdx, toIdx);
   }
   function fareForStops(fromIdx, toIdx) {
-    const km = stopDistance(fromIdx, toIdx) / 1000;
-    return Math.max(FARE_BASE, Math.round(FARE_BASE + FARE_PER_KM * km));
+    return LOGIC.fareForStops(BUS_STOPS, fromIdx, toIdx);
   }
   // Every waiting passenger has somewhere to go; the fare follows from that pair of stops.
   function pickDestination(fromIdx) {
-    const n = BUS_STOPS.length;
-    if (n < 2) return fromIdx;
-    let to = fromIdx;
-    for (let tries = 0; tries < 8 && to === fromIdx; tries++) to = Math.floor(Math.random() * n);
-    return to === fromIdx ? (fromIdx + 1) % n : to;
+    return LOGIC.pickDestination(fromIdx, BUS_STOPS.length);
   }
 
   // Shuttle routes along the real IISER TVM campus road network.
@@ -508,23 +506,7 @@
   ];
 
   function samplePolylineAt(pts, fraction) {
-    let total = 0;
-    for (let i = 1; i < pts.length; i++) total += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]);
-    let target = total * fraction, acc = 0;
-    for (let i = 1; i < pts.length; i++) {
-      const seg = Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]);
-      if (acc + seg >= target && seg > 0.01) {
-        const u = (target - acc) / seg;
-        return {
-          x: pts[i - 1][0] + (pts[i][0] - pts[i - 1][0]) * u,
-          z: pts[i - 1][1] + (pts[i][1] - pts[i - 1][1]) * u,
-          heading: Math.atan2(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1])
-        };
-      }
-      acc += seg;
-    }
-    const last = pts[pts.length - 1];
-    return { x: last[0], z: last[1], heading: 0 };
+    return LOGIC.samplePolylineAt(pts, fraction);
   }
 
   const speedCameraRigs = [];
@@ -603,6 +585,8 @@
         game.score = Math.max(0, game.score - FINE_AMOUNT);
         busState.fines += 1;
         busState.fineAmount += FINE_AMOUNT;
+        trip.fines += 1;
+        trip.comfort = Math.max(0, trip.comfort - 8);
         flashNotice('Speed camera − fine ₹' + FINE_AMOUNT + ' over 50 km/h (' + Math.round(Math.abs(busState.speed) * 3.6) + ' km/h)', 'bad');
       }
     }
@@ -2327,7 +2311,7 @@
     if (isTypingTarget(e.target)) return;
     const k = e.key;
     const kk = k.length === 1 ? k.toLowerCase() : k;
-    if (['w', 'a', 's', 'd', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' ', 'h', 'c', 'f', 'g', 'b', 'r', 'm', 'Escape', '1', '2', '3', '4', '5', '6', '7'].indexOf(kk) < 0) return;
+    if (['w', 'a', 's', 'd', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' ', 'h', 'c', 'f', 'g', 'b', 'r', 'm', 'p', 'Escape', '1', '2', '3', '4', '5', '6', '7'].indexOf(kk) < 0) return;
     e.preventDefault();
     if (kk === 'w' || kk === 'ArrowUp') held.up = true;
     else if (kk === 's' || kk === 'ArrowDown') held.down = true;
@@ -2343,7 +2327,8 @@
     else if (kk === 'b') toggleHazards();
     else if (kk === 'r') resetVehicle();
     else if (kk === 'm') openModePicker();
-    else if (kk === 'Escape') exitDriveMode();
+    else if (kk === 'p') setPhotoMode(!photo.active);
+    else if (kk === 'Escape') { if (photo.active) setPhotoMode(false); else exitDriveMode(); }
     else if (kk >= '1' && kk <= '7') setCamMode(parseInt(kk, 10) - 1);
   }
 
@@ -2521,9 +2506,169 @@
     objectiveText: '', detailText: '', statusText: '', stopName: '', stopDist: 0,
     stopEta: 0, nextStopIndex: -1,
     dwellStopIndex: -1, dwellTime: 0, dwellAlighted: 0,
+    boardedTotal: 0, // monotonic count of completed boardings, used by Chase scoring
     onboard: [] // destination stop index of every passenger currently aboard
   };
   try { game.trialBest = parseFloat(localStorage.getItem('iiser.drive.trialBest') || '0') || 0; } catch (_) {}
+
+  // ---------- Ride comfort, night shift, landmark log & photo mode ----------
+  // Comfort starts at 100 each run and drops for rough driving. The grade is
+  // shown live in the HUD and announced when a run/loop completes.
+  const trip = {
+    comfort: 100, harshBrakes: 0, hardCorners: 0, fines: 0, collisions: 0,
+    distance: 0, lastBrakeAt: -99, lastCornerAt: -99, lastBumpAt: -99
+  };
+  function resetTrip() {
+    trip.comfort = 100;
+    trip.harshBrakes = 0;
+    trip.hardCorners = 0;
+    trip.fines = 0;
+    trip.collisions = 0;
+    trip.distance = 0;
+    trip.lastBrakeAt = -99;
+    trip.lastCornerAt = -99;
+    trip.lastBumpAt = -99;
+  }
+  function rideGrade() {
+    const g = LOGIC.comfortGrade(trip.comfort);
+    // The baseline grade requires actually driving somewhere first.
+    return trip.distance < 40 && g === 'S' ? '—' : g;
+  }
+  function announceTrip(label, suffix) {
+    if (trip.distance < 40) { resetTrip(); return; }
+    const grade = LOGIC.comfortGrade(trip.comfort);
+    const bits = [];
+    if (trip.harshBrakes) bits.push(trip.harshBrakes + ' hard brake' + (trip.harshBrakes > 1 ? 's' : ''));
+    if (trip.hardCorners) bits.push(trip.hardCorners + ' sharp turn' + (trip.hardCorners > 1 ? 's' : ''));
+    if (trip.fines) bits.push(trip.fines + ' fine' + (trip.fines > 1 ? 's' : ''));
+    if (trip.collisions) bits.push(trip.collisions + ' bump' + (trip.collisions > 1 ? 's' : ''));
+    const text = label + ' · Ride ' + grade + ' (' + Math.round(trip.comfort) + ') · ' +
+      (bits.length ? bits.join(' · ') : 'smooth driving') + (suffix || '');
+    const kind = (grade === 'S' || grade === 'A') ? 'good' : (grade === 'D' ? 'bad' : undefined);
+    flashNotice(text, kind);
+    resetTrip();
+  }
+
+  // Night services pay a shift allowance; the button also switches the
+  // headlights on and drives the existing time-of-day control.
+  function nightMode() {
+    try { return !!(unrealFX && unrealFX.getPreset && unrealFX.getPreset() === 'night'); } catch (_) { return false; }
+  }
+  function fareMultiplier() { return LOGIC.fareMultiplier(nightMode()); }
+  function setTimeOfDay(key) {
+    const sel = document.getElementById('tod-select');
+    if (sel) { sel.value = key; sel.dispatchEvent(new Event('change')); return; }
+    if (unrealFX && unrealFX.applyPreset) unrealFX.applyPreset(key);
+  }
+  function toggleNightShift() {
+    const goNight = !nightMode();
+    setTimeOfDay(goNight ? 'night' : 'day');
+    if (goNight) {
+      busState.lights = true;
+      if (ui && ui.lightsBtn) ui.lightsBtn.classList.add('on');
+    }
+    updateHUD(performance.now() / 1000);
+    flashNotice(goNight
+      ? 'Night shift · fares +50% · headlights on'
+      : 'Day shift · standard fares', goNight ? 'good' : undefined);
+  }
+
+  // The curated map labels double as a sightseeing checklist.
+  const LANDMARKS = ((D && D.labels) || [])
+    .filter(l => l && l.text && isFinite(l.x) && isFinite(l.z))
+    .map(l => ({ id: String(l.id || l.text), name: l.text, x: l.x, z: l.z }));
+  const visitedLandmarks = new Set();
+  try {
+    for (const id of JSON.parse(localStorage.getItem('iiser.drive.landmarks') || '[]')) visitedLandmarks.add(String(id));
+  } catch (_) {}
+  let landmarkCheckAt = 0;
+  function landmarkProgressText() {
+    return 'Campus landmarks <strong>' + visitedLandmarks.size + '</strong>/' + LANDMARKS.length;
+  }
+  function updateLandmarkDiscovery(dt, t) {
+    if (!LANDMARKS.length || t - landmarkCheckAt < 0.6) return;
+    landmarkCheckAt = t;
+    // Sightseeing is deliberate: only log landmarks while rolling slowly.
+    if (Math.abs(busState.speed) > 6) return;
+    let best = null, bestD = Infinity;
+    for (const l of LANDMARKS) {
+      const d = Math.hypot(busState.x - l.x, busState.z - l.z);
+      if (d < bestD) { bestD = d; best = l; }
+    }
+    if (!best || bestD > 55 || visitedLandmarks.has(best.id)) return;
+    visitedLandmarks.add(best.id);
+    try { localStorage.setItem('iiser.drive.landmarks', JSON.stringify(Array.from(visitedLandmarks))); } catch (_) {}
+    flashNotice('Landmark logged · ' + best.name + ' (' + visitedLandmarks.size + '/' + LANDMARKS.length + ')', 'good');
+    if (ui && ui.discovered) ui.discovered.innerHTML = landmarkProgressText();
+  }
+
+  // Photo mode freezes the vehicle, hides the HUD and orbits the camera with
+  // the pointer so a clean PNG can be exported.
+  const photo = { active: false, dragging: false, theta: 2.1, phi: 0.36, radius: 18, fov: 48, lastX: 0, lastY: 0 };
+  function setPhotoMode(on) {
+    on = !!on;
+    if (on === photo.active) return;
+    photo.active = on;
+    photo.dragging = false;
+    document.body.classList.toggle('photo-mode', on);
+    held.up = held.down = held.left = held.right = held.hand = false;
+    busState.speed = 0;
+    camSnap = true;
+    if (ui) {
+      ui.hud.classList.toggle('hidden', on);
+      ui.modeStrip.classList.toggle('hidden', on);
+      ui.camStrip.classList.toggle('hidden', on);
+      ui.mpBoard.classList.toggle('hidden', on || !(mp.enabled || busState.mode === 'multi'));
+      if (ui.chasePanel) ui.chasePanel.classList.toggle('hidden', on || busState.mode !== 'chase');
+      if (ui.photoBar) ui.photoBar.classList.toggle('hidden', !on);
+      ui.tagLayer.style.display = on ? 'none' : '';
+    }
+    flashNotice(on
+      ? 'Photo mode · drag to orbit · scroll to zoom · P to exit'
+      : 'Back to driving', on ? 'good' : undefined);
+  }
+  function savePhoto() {
+    try {
+      renderer.render(scene, camera);
+      const url = renderer.domElement.toDataURL('image/png');
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'iiser-campus-' + Date.now() + '.png';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      flashNotice('Photo saved', 'good');
+    } catch (err) {
+      flashNotice('Could not save the photo', 'bad');
+    }
+  }
+  (function initPhotoControls() {
+    const c = renderer && renderer.domElement;
+    if (!c) return;
+    c.addEventListener('pointerdown', e => {
+      if (!photo.active) return;
+      photo.dragging = true;
+      photo.lastX = e.clientX;
+      photo.lastY = e.clientY;
+      if (c.setPointerCapture) { try { c.setPointerCapture(e.pointerId); } catch (_) {} }
+    });
+    c.addEventListener('pointermove', e => {
+      if (!photo.active || !photo.dragging) return;
+      const dx = e.clientX - photo.lastX, dy = e.clientY - photo.lastY;
+      photo.lastX = e.clientX;
+      photo.lastY = e.clientY;
+      photo.theta -= dx * 0.006;
+      photo.phi = clamp(photo.phi + dy * 0.005, 0.02, 1.35);
+    });
+    const endDrag = () => { photo.dragging = false; };
+    c.addEventListener('pointerup', endDrag);
+    c.addEventListener('pointercancel', endDrag);
+    c.addEventListener('wheel', e => {
+      if (!photo.active) return;
+      e.preventDefault();
+      photo.radius = clamp(photo.radius * Math.exp(e.deltaY * 0.0012), 5, 70);
+    }, { passive: false });
+  })();
 
   function nearestBusStop(x, z) {
     let best = null, bestIdx = -1, bestD = Infinity;
@@ -2625,6 +2770,10 @@
       b.addEventListener('click', () => setCamMode(i));
       camStrip.appendChild(b);
     });
+    const photoPill = makeEl('button', 'cam-pill', '<kbd>P</kbd>Photo');
+    photoPill.type = 'button';
+    photoPill.addEventListener('click', () => setPhotoMode(true));
+    camStrip.appendChild(photoPill);
     document.body.appendChild(camStrip);
 
     const hud = makeEl('div', 'shuttle-hud hidden');
@@ -2662,7 +2811,8 @@
       '</div>' +
       '<div class="sh-center panel">' +
         '<div class="sh-route-top"><span class="sh-route-kicker" id="sh-mode-name">FREE DRIVE</span>' +
-          '<span class="sh-grade-pill" id="sh-objective">Explore</span></div>' +
+          '<span class="sh-grade-pill" id="sh-objective">Explore</span>' +
+          '<span class="sh-ride-pill" id="sh-ride" title="Cabin comfort grade">—</span></div>' +
         '<div class="sh-stop-row"><span class="sh-stop-name" id="sh-stop-name">IISER Vithura Campus</span>' +
           '<span class="sh-stop-dist" id="sh-dist"></span></div>' +
         '<div class="sh-timing" id="sh-timing"></div>' +
@@ -2692,8 +2842,10 @@
           '<button class="btn" type="button" id="sh-exit">Exit</button></div>' +
         '<div class="sh-status" id="sh-objective-detail">Explore the campus at your own pace.</div>' +
         '<div class="mp-status-box" id="sh-mp-status">Solo session &middot; 8-player rooms available</div>' +
+        '<div class="sh-discovered" id="sh-discovered">Campus landmarks 0/29</div>' +
         '<div class="mp-btn-row">' +
           '<button class="btn" type="button" id="sh-mp-open">Multiplayer</button>' +
+          '<button class="btn" type="button" id="sh-night">Night shift</button>' +
           '<button class="btn" type="button" id="sh-help">How to play</button>' +
           '<button class="btn" type="button" id="sh-trees">Trees on</button>' +
           '<button class="btn" type="button" id="sh-audio">Sound on</button>' +
@@ -2750,6 +2902,14 @@
       '<button class="touch-btn touch-exit" id="sh-touch-exit" type="button" aria-label="Exit driving">Exit</button>';
     document.body.appendChild(touch);
 
+    const photoBar = makeEl('div', 'photo-bar hidden');
+    photoBar.innerHTML =
+      '<span class="photo-title">Photo mode</span>' +
+      '<span class="photo-hint">Drag to orbit &middot; scroll to zoom</span>' +
+      '<button class="btn" type="button" id="sh-photo-save">Save PNG</button>' +
+      '<button class="btn" type="button" id="sh-photo-exit">Exit</button>';
+    document.body.appendChild(photoBar);
+
     ui = {
       modeStrip, camStrip, hud, mpBoard, tagLayer, touch,
       speed: hud.querySelector('#sh-speed'),
@@ -2770,6 +2930,10 @@
       fines: hud.querySelector('#sh-fines'),
       temp: hud.querySelector('#sh-temp'),
       odo: hud.querySelector('#sh-odo'),
+      ride: hud.querySelector('#sh-ride'),
+      discovered: hud.querySelector('#sh-discovered'),
+      nightBtn: hud.querySelector('#sh-night'),
+      photoBar: photoBar,
       chasePanel: chasePanel,
       chaseTitle: chasePanel.querySelector('#chase-title'),
       chaseRound: chasePanel.querySelector('#chase-round'),
@@ -2808,6 +2972,10 @@
     const touchExitBtn = touch.querySelector('#sh-touch-exit');
     if (touchExitBtn) touchExitBtn.addEventListener('click', exitDriveMode);
     ui.mpBtn.addEventListener('click', openMpModal);
+    if (ui.nightBtn) ui.nightBtn.addEventListener('click', toggleNightShift);
+    photoBar.querySelector('#sh-photo-save').addEventListener('click', savePhoto);
+    photoBar.querySelector('#sh-photo-exit').addEventListener('click', () => setPhotoMode(false));
+    if (ui.discovered) ui.discovered.innerHTML = landmarkProgressText();
     if (ui.helpBtn) ui.helpBtn.addEventListener('click', () => {
       if (window.CampusDriveHowToOpen) window.CampusDriveHowToOpen();
     });
@@ -2922,6 +3090,7 @@
     if (!GAME_MODES.some(m => m.id === id)) id = 'free';
     clearParkingProps();
     game.targetRing = -1;
+    resetTrip();
     busState.mode = id;
     game.mode = id;
     game.stopName = '';
@@ -3080,7 +3249,7 @@
             game.laps++;
             game.score += 500;
             if (vehicleNeedsEnabled) busState.fuel = Math.max(20, busState.fuel - 4);
-            flashNotice('Loop complete · ₹500 bonus', 'good');
+            announceTrip('Loop complete', ' · ₹500 bonus');
           }
           game.dwellStopIndex = -1;
           game.dwellTime = 0;
@@ -3121,6 +3290,7 @@
               game.trialBest = game.trialTime;
               try { localStorage.setItem('iiser.drive.trialBest', String(game.trialBest)); } catch (_) {}
             }
+            announceTrip('Time trial ' + game.trialTime.toFixed(1) + 's');
             playStopChime();
           }
         }
@@ -3140,6 +3310,7 @@
             const pts = Math.max(120, 1000 - Math.round(d * 120));
             game.score = pts;
             playStopChime();
+            announceTrip('Parking test ' + pts + ' pts');
             if (ui) ui.status.textContent = 'Parked cleanly — score ' + pts + '!';
           }
         } else {
@@ -3163,6 +3334,7 @@
         if (game.cpIndex >= game.checkpoints.length) {
           game.cpIndex = 0;
           game.score += 400;
+          announceTrip('Safari leg complete', ' · ₹400 bonus');
           playStopChime();
         }
       }
@@ -3180,13 +3352,15 @@
       } else if (chase.phase === 'run' && chaseIsRider()) {
         const st = chase.targetIdx >= 0 ? BUS_STOPS[chase.targetIdx] : null;
         const d = st ? Math.hypot(busState.x - st.x, busState.z - st.z) : 0;
-        game.objectiveText = 'Rider · ride ' + (chase.rides + 1);
-        game.stopName = st ? 'Next fare · ' + st.name : 'Find a stop';
+        const dropping = chase.targetKind === 'drop';
+        game.objectiveText = dropping ? 'Rider · drop off' : 'Rider · pick up';
+        game.stopName = st ? (dropping ? 'Drop · ' : 'Fare · ') + st.name : 'Find a stop';
         game.stopDist = d;
         game.stopEta = st ? estimateStopEta(d) : 0;
         game.nextStopIndex = chase.targetIdx;
         game.statusText = 'Rides ' + chase.rides + ' · ₹' + Math.round(chase.money) +
-          ' · stop and hold 2 s · chasers are hunting you';
+          ' · ' + (dropping ? 'deliver the students' : 'stop so students can board') +
+          ' · chasers are hunting you';
         ringPulse(chase.targetIdx, t);
       } else if (chase.phase === 'run') {
         const riderPeer = mp.peers.get(chase.riderId);
@@ -3312,6 +3486,7 @@
   // ---------- Arcade vehicle physics ----------
   function updatePlayer(dt, t) {
     const def = VEHICLE_DEFS[busState.vehicle];
+    const speedBefore = busState.speed;
     const fwdIntent = held.up;
     const backIntent = held.down;
     const serviceLock = busState.mode === 'route' && game.dwellStopIndex >= 0;
@@ -3353,6 +3528,25 @@
     busState.speed = clamp(busState.speed, -def.reverseMax, def.maxSpeed);
     if (serviceLock) busState.speed = 0;
 
+    // Cabin comfort: a stamp on the brakes or hard cornering with passengers
+    // aboard counts against the run's S–D grade.
+    const longAccel = (busState.speed - speedBefore) / Math.max(dt, 1e-4);
+    const yawRate = normAng(busState.heading - h0) / Math.max(dt, 1e-4);
+    const latAccel = Math.abs(busState.speed * yawRate);
+    if (!serviceLock && !held.hand && speedBefore > 4 &&
+        longAccel < -4.2 && t - trip.lastBrakeAt > 1.0) {
+      trip.lastBrakeAt = t;
+      trip.harshBrakes += 1;
+      trip.comfort = Math.max(0, trip.comfort - 6);
+    }
+    if (!serviceLock && Math.abs(busState.speed) > 4 &&
+        latAccel > 4.6 && t - trip.lastCornerAt > 1.2) {
+      trip.lastCornerAt = t;
+      trip.hardCorners += 1;
+      trip.comfort = Math.max(0, trip.comfort - 5);
+    }
+    trip.distance += Math.abs(busState.speed) * dt;
+
     const steerIn = (held.left ? 1 : 0) - (held.right ? 1 : 0);
     const speedNorm = clamp(Math.abs(busState.speed) / def.maxSpeed, 0, 1);
     const steerTarget = steerIn * def.steerMax * (1 - 0.45 * speedNorm);
@@ -3385,6 +3579,11 @@
       const damage = Math.min(45, Math.round((impactNow - 1.6) * 7));
       if (damage > 0) {
         if (vehicleNeedsEnabled) busState.health = Math.max(0, busState.health - damage);
+        if (t - trip.lastBumpAt > 0.6) {
+          trip.lastBumpAt = t;
+          trip.comfort = Math.max(0, trip.comfort - 10);
+          trip.collisions += 1;
+        }
         if (t - busState.lastHitFineAt > 4.0) {
           busState.lastHitFineAt = t;
           game.score = Math.max(0, game.score - HIT_FINE);
@@ -3455,6 +3654,21 @@
     const def = VEHICLE_DEFS[busState.vehicle];
     const rig = activeRig;
     if (!rig || !rig.root) return;
+    if (photo.active) {
+      const gy = getSurfaceHeight(busState.x, busState.z);
+      const cp = Math.cos(photo.phi);
+      _camV.set(
+        busState.x + Math.sin(photo.theta) * cp * photo.radius,
+        gy + 1.7 + Math.sin(photo.phi) * photo.radius,
+        busState.z + Math.cos(photo.theta) * cp * photo.radius
+      );
+      _lookV.set(busState.x, gy + 1.6, busState.z);
+      camera.position.copy(_camV);
+      camera.lookAt(_lookV);
+      camera.fov = photo.fov;
+      camera.updateProjectionMatrix();
+      return;
+    }
     if (bus.modelMount && busState.vehicle === 'bus' && busState.camMode !== 0) bus.modelMount.visible = true;
     rig.root.updateMatrixWorld(true);
     const h = busState.heading;
@@ -3616,6 +3830,19 @@
     ui.health.textContent = vehicleNeedsEnabled ? Math.round(busState.health) + '%' : 'OFF';
     ui.health.classList.toggle('lit-red-text', vehicleNeedsEnabled && busState.health <= 30);
     ui.fines.textContent = '₹' + Math.round(busState.fineAmount);
+    if (ui.ride) {
+      const grade = rideGrade();
+      ui.ride.textContent = grade;
+      ui.ride.dataset.grade = grade;
+      ui.ride.title = 'Cabin comfort ' + Math.round(trip.comfort) + '/100 · ' +
+        (trip.harshBrakes + trip.hardCorners + trip.fines + trip.collisions) +
+        ' rough moments this run';
+    }
+    if (ui.nightBtn) {
+      const night = nightMode();
+      ui.nightBtn.textContent = night ? 'Day shift' : 'Night shift';
+      ui.nightBtn.classList.toggle('on', night);
+    }
 
     ui.modeName.textContent = (GAME_MODES.find(m => m.id === busState.mode) || GAME_MODES[0]).kicker;
     ui.objective.textContent = game.objectiveText || 'Explore';
@@ -3697,6 +3924,12 @@
 
   function exitDriveMode() {
     if (!busState.active) return;
+    if (photo.active) {
+      photo.active = false;
+      photo.dragging = false;
+      document.body.classList.remove('photo-mode');
+      if (ui && ui.photoBar) ui.photoBar.classList.add('hidden');
+    }
     busState.active = false;
     busState.driving = false;
     held.up = held.down = held.left = held.right = held.hand = false;
@@ -4701,12 +4934,15 @@
   // first chaser to touch the rider's vehicle ends the run. The room then votes for the
   // next rider among drivers who have not ridden yet, until everyone has had a turn.
   const CHASE_VOTE_SECONDS = 8;
-  const CHASE_RIDE_DWELL = 2.0;
+  const CHASE_RIDE_WAIT = 6.0;      // empty pickup bay: give up and drive on
+  const CHASE_BOARD_TIMEOUT = 8.0;  // safety valve if a boarding never finishes
   const chase = {
     phase: 'idle',          // idle | run | vote | done
     round: 0, total: 0,
     riderId: '', riderName: '', riderColor: 0,
-    rides: 0, money: 0, targetIdx: -1, lastTarget: -1, dwell: 0,
+    rides: 0, money: 0, targetIdx: -1, lastTarget: -1, dwell: 0, boardMark: 0,
+    targetKind: 'pickup',   // pickup → drop → pickup …, shown on the minimap as the path
+    picked: [],             // destination stop of every student collected this trip
     riderRides: 0, riderMoney: 0,
     results: [],            // one row per finished rider run
     votes: {},              // voterId -> candidateId
@@ -4730,6 +4966,8 @@
   }
   function chaseIsAuthority() { return chaseAuthorityId() === localPlayer.id; }
   function chaseIsRider() { return chase.phase === 'run' && chase.riderId === localPlayer.id; }
+  // Only the rider's vehicle runs the stop service during a chase.
+  function chaseRiderServing() { return busState.mode === 'chase' && chaseIsRider(); }
 
   function chaseBroadcast(payload) {
     if (!mp.enabled) return;
@@ -4740,6 +4978,7 @@
     chase.phase = 'idle'; chase.round = 0; chase.total = 0;
     chase.riderId = ''; chase.riderName = ''; chase.riderColor = 0;
     chase.rides = 0; chase.money = 0; chase.targetIdx = -1; chase.lastTarget = -1; chase.dwell = 0;
+    chase.targetKind = 'pickup'; chase.picked.length = 0; chase.boardMark = 0;
     chase.riderRides = 0; chase.riderMoney = 0;
     chase.results.length = 0; chase.votes = {};
     chase.voteEndsAt = 0; chase.pendingCatchAt = 0; chase.pendingCatchBy = '';
@@ -4749,16 +4988,45 @@
 
   function chasePickTarget() {
     let best = -1, bestScore = -Infinity;
+    let any = -1, anyScore = -Infinity;
     for (let i = 0; i < BUS_STOPS.length; i++) {
       const st = BUS_STOPS[i];
       if (i === chase.lastTarget) continue;
       const d = Math.hypot(st.x - busState.x, st.z - busState.z);
       if (d < 45) continue;
       const score = d + Math.random() * 60;
-      if (score > bestScore) { bestScore = score; best = i; }
+      if (score > anyScore) { anyScore = score; any = i; }
+      // Favour a stop that really has students on it, so the fare is collectable.
+      const hasWaiting = waitingStudents.some(s => s.stopIndex === i && s.state === 'waiting');
+      if (hasWaiting && score > bestScore) { bestScore = score; best = i; }
     }
     if (best >= 0) return best;
+    if (any >= 0) return any;
     return chase.lastTarget === 0 ? 1 : 0;
+  }
+
+  // Where the group collected at one stop is headed: the most common destination.
+  function chaseGroupDestination() {
+    const tally = new Map();
+    for (const idx of chase.picked) {
+      if (idx == null || idx < 0) continue;
+      tally.set(idx, (tally.get(idx) || 0) + 1);
+    }
+    let best = -1, bestN = 0;
+    for (const [idx, n] of tally) if (n > bestN) { bestN = n; best = idx; }
+    return best;
+  }
+
+  // Deliver everyone aboard at the current stop, using the normal alighting walk.
+  function dropChasePassengers() {
+    const n = Math.min(game.passengers, game.onboard.length);
+    game.onboard.length = 0;
+    if (n <= 0) return 0;
+    const near = nearestBusStop(busState.x, busState.z);
+    const st = near ? near.stop : null;
+    return spawnAlightingPassengers(n,
+      st && st.shelterX != null ? st.shelterX : busState.x,
+      st && st.shelterZ != null ? st.shelterZ : busState.z);
   }
 
   function chaseApplyStart(msg) {
@@ -4770,11 +5038,11 @@
     chase.riderColor = msg.riderColor | 0;
     if (Array.isArray(msg.results)) chase.results = msg.results.slice();
     chase.rides = 0; chase.money = 0; chase.dwell = 0; chase.targetIdx = -1;
+    chase.targetKind = 'pickup'; chase.picked.length = 0; chase.boardMark = 0;
     chase.riderRides = 0; chase.riderMoney = 0;
     chase.votes = {}; chase.voteEndsAt = 0;
     chase.pendingCatchAt = 0; chase.pendingCatchBy = '';
     chase.winner = '';
-    if (chaseIsRider()) chase.targetIdx = chasePickTarget();
     chase.panelSig = '';
     // Spread the field. Everyone shares one spawn, so without this the rider and
     // chasers would start touching and the round would end on the first frame.
@@ -4790,6 +5058,8 @@
         syncRigPose(0, true);
       }
     }
+    // The fare target has to be chosen after the spawn move, not from the old spot.
+    if (chaseIsRider()) { chase.targetIdx = chasePickTarget(); chase.boardMark = game.boardedTotal; }
     chase.graceUntil = chaseNow() + 3.0;
     if (ui) {
       flashNotice(chaseIsRider()
@@ -4822,6 +5092,7 @@
     chase.votes = {};
     if (isRider) {
       chase.rides = 0; chase.money = 0; chase.targetIdx = -1; chase.dwell = 0;
+      chase.targetKind = 'pickup'; chase.picked.length = 0;
       chaseBroadcast({
         action: 'end', riderId: chase.riderId, rides: rides | 0, money: Math.round(money || 0),
         by: by || chase.pendingCatchBy || ''
@@ -5039,21 +5310,61 @@
 
     if (chase.phase === 'run') {
       if (chaseIsRider()) {
-        if (chase.targetIdx < 0) chase.targetIdx = chasePickTarget();
+        if (chase.targetIdx < 0) {
+          chase.targetKind = 'pickup';
+          chase.targetIdx = chasePickTarget();
+          chase.boardMark = game.boardedTotal;
+          chase.dwell = 0;
+        }
         const st = BUS_STOPS[chase.targetIdx];
         if (st) {
           const d = Math.hypot(busState.x - st.x, busState.z - st.z);
-          if (d < 12 && Math.abs(busState.speed) < 1.2) {
+          // Same speed gate as the stop service, or students never step out.
+          if (d < 12 && Math.abs(busState.speed) < 0.8) {
             chase.dwell += dt;
-            if (chase.dwell >= CHASE_RIDE_DWELL) {
-              chase.dwell = 0;
-              chase.rides += 1;
-              chase.money += 40 + chase.rides * 10;
+            if (chase.targetKind === 'pickup') {
+              const boarded = game.boardedTotal - chase.boardMark;
+              const stillBoarding = waitingStudents.some(s => s.stopIndex === chase.targetIdx && s.state === 'boarding');
+              if (boarded > 0 && (!stillBoarding || chase.dwell >= CHASE_BOARD_TIMEOUT)) {
+                // The whole group is in: each student is one ride, and the minimap
+                // switches to the road path of where they are going.
+                for (let k = 0; k < boarded; k++) {
+                  chase.rides += 1;
+                  chase.money += 40 + chase.rides * 10;
+                }
+                const dest = chaseGroupDestination();
+                chase.picked.length = 0;
+                chase.boardMark = game.boardedTotal;
+                chase.lastTarget = chase.targetIdx;
+                chase.targetKind = 'drop';
+                chase.targetIdx = dest >= 0 && dest !== chase.targetIdx ? dest : chasePickTarget();
+                chase.dwell = 0;
+                chase.panelSig = '';
+                try { playStopChime(); } catch (_) {}
+                flashNotice(boarded + ' student' + (boarded > 1 ? 's' : '') + ' collected · deliver them to ' +
+                  (BUS_STOPS[chase.targetIdx] ? BUS_STOPS[chase.targetIdx].name : 'the next stop'), 'good');
+                updateChasePanel();
+              } else if (boarded === 0 && chase.dwell >= CHASE_RIDE_WAIT) {
+                // An empty bay: move on to the next group.
+                chase.lastTarget = chase.targetIdx;
+                chase.targetIdx = chasePickTarget();
+                chase.boardMark = game.boardedTotal;
+                chase.dwell = 0;
+              }
+            } else {
+              // Drop-off: deliver the group, then collect the next set right here
+              // (or the nearest stop that actually has people waiting).
+              const dropped = dropChasePassengers();
+              chase.picked.length = 0;
               chase.lastTarget = chase.targetIdx;
-              chase.targetIdx = chasePickTarget();
+              const here = chase.targetIdx;
+              const hasHere = waitingStudents.some(s => s.stopIndex === here && s.state === 'waiting');
+              chase.targetKind = 'pickup';
+              chase.targetIdx = hasHere ? here : chasePickTarget();
+              chase.boardMark = game.boardedTotal;
+              chase.dwell = 0;
               chase.panelSig = '';
-              try { playStopChime(); } catch (_) {}
-              flashNotice('Ride ' + chase.rides + ' done · ₹' + chase.money, 'good');
+              if (dropped > 0) flashNotice(dropped + ' student' + (dropped > 1 ? 's' : '') + ' dropped off · ₹' + Math.round(chase.money), 'good');
               updateChasePanel();
             }
           } else chase.dwell = 0;
@@ -5129,7 +5440,9 @@
   // Free Ride and Multiplayer still honour the campus pickup points:
   // stop the bus inside a stop bay and students walk aboard.
   function updateStopService(dt, t) {
-    if (!busState.active || busState.mode === 'route' || busState.mode === 'chase') return;
+    if (!busState.active || busState.mode === 'route') return;
+    // In Chase only the rider serves stops; chasers are there to hunt, not to pick up.
+    if (busState.mode === 'chase' && !chaseIsRider()) return;
     const near = nearestBusStop(busState.x, busState.z);
     const stopped = Math.abs(busState.speed) < 0.8;
     const within = !!near && near.d < 11;
@@ -5203,8 +5516,11 @@
           s.state = 'gone';
           s.respawnAt = t + 7 + ((i * 5 + 2) % 9);
           game.passengers += 1;
+          game.boardedTotal += 1;
           if (s.destIndex != null) game.onboard.push(s.destIndex);
-          const fare = s.fare != null ? s.fare : 20;
+          // Chase groups are delivered together, so remember each student's destination.
+          if (chaseRiderServing() && chase.targetKind === 'pickup') chase.picked.push(s.destIndex);
+          const fare = Math.round((s.fare != null ? s.fare : 20) * fareMultiplier());
           game.score += fare;
           const destName = s.destIndex != null && BUS_STOPS[s.destIndex] ? BUS_STOPS[s.destIndex].name : '';
           flashNotice('+₹' + fare + (destName ? ' · to ' + destName : ' · passenger boarded'), 'good');
@@ -5257,12 +5573,18 @@
     updateStopService(dt, t);
     updateWaitingStudents(dt, t);
     if (busState.active) {
-      updatePlayer(dt, t);
-      updateFuel(dt, t);
-      checkSpeedCameras(t);
-      updateDriveCamera(dt, t);
-      updateObjective(dt, t);
-      if (t - hudAt > 0.10) { hudAt = t; updateHUD(t); }
+      if (photo.active) {
+        // The vehicle stays parked while the camera orbits.
+        updateDriveCamera(dt, t);
+      } else {
+        updatePlayer(dt, t);
+        updateFuel(dt, t);
+        checkSpeedCameras(t);
+        updateLandmarkDiscovery(dt, t);
+        updateDriveCamera(dt, t);
+        updateObjective(dt, t);
+        if (t - hudAt > 0.10) { hudAt = t; updateHUD(t); }
+      }
       if (t - dashAt > 0.15) { dashAt = t; updateDash(t); }
     }
     updateMultiplayer(dt, t);
@@ -5515,6 +5837,61 @@
         }
       }
 
+      // Other drivers in the room, in their player colour. On the tight heading-up
+      // crop a driver can easily be outside the window, so far ones are pinned to
+      // the edge as arrows instead of vanishing from the map.
+      if (mp.enabled && mp.peers.size) {
+        const cw = ctx.canvas.width, chh = ctx.canvas.height;
+        for (const pr of mp.peers.values()) {
+          const px = mx(pr.x), py = my(pr.z);
+          const color = (PLAYER_COLORS[(pr.colorIdx | 0) % PLAYER_COLORS.length] || {}).css || '#8ad8ff';
+          const off = px < 9 || px > cw - 9 || py < 9 || py > chh - 9;
+          if (off) {
+            const ex = Math.max(9, Math.min(cw - 9, px));
+            const ey = Math.max(9, Math.min(chh - 9, py));
+            const ang = Math.atan2(py - my(busState.z), px - mx(busState.x));
+            ctx.save();
+            ctx.translate(ex, ey);
+            ctx.rotate(ang);
+            ctx.beginPath();
+            ctx.moveTo(5.2, 0);
+            ctx.lineTo(-3.4, 3.8);
+            ctx.lineTo(-3.4, -3.8);
+            ctx.closePath();
+            ctx.fillStyle = color;
+            ctx.strokeStyle = 'rgba(8,14,11,0.88)';
+            ctx.lineWidth = 1.1;
+            ctx.fill();
+            ctx.stroke();
+            ctx.restore();
+            continue;
+          }
+          // In a chase the rider is the target, so it gets a gold halo.
+          if (busState.mode === 'chase' && chase.phase === 'run' && pr.id === chase.riderId) {
+            ctx.beginPath();
+            ctx.arc(px, py, 6.8, 0, Math.PI * 2);
+            ctx.strokeStyle = '#ffd166';
+            ctx.lineWidth = 1.8;
+            ctx.stroke();
+          }
+          // Heading tick, then the driver dot.
+          ctx.beginPath();
+          ctx.moveTo(px, py);
+          ctx.lineTo(px + Math.sin(pr.heading || 0) * 7.4, py + Math.cos(pr.heading || 0) * 7.4);
+          ctx.strokeStyle = color;
+          ctx.lineWidth = 1.6;
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.arc(px, py, 3.4, 0, Math.PI * 2);
+          ctx.fillStyle = color;
+          ctx.strokeStyle = 'rgba(8,14,11,0.92)';
+          ctx.lineWidth = 1.2;
+          ctx.fill();
+          ctx.stroke();
+          if (pr.name) label(pr.name.slice(0, 11), px, py, 'bold 8px system-ui, sans-serif', color, -7);
+        }
+      }
+
       // Next pickup: pulsing ring plus a bearing line from the bus.
       if (next && busState.initialized) {
         const nx = mx(next.x), ny = my(next.z);
@@ -5589,9 +5966,12 @@
         ctx.arc(nx, ny, pulse + 3, 0, Math.PI * 2);
         ctx.stroke();
         ctx.globalAlpha = 1.0;
-        // Label: next stop name
+        // Label: next stop name, and in a chase whether it is a pickup or drop-off.
         if (routeMode && active) {
           label(next.name, nx, ny, 'bold 9px system-ui, sans-serif', '#fff', -8);
+        } else if (busState.mode === 'chase' && chase.phase === 'run') {
+          label((chase.targetKind === 'drop' ? 'DROP · ' : 'PICKUP · ') + next.name,
+            nx, ny, 'bold 8px system-ui, sans-serif', chase.targetKind === 'drop' ? '#8ef0b5' : '#ffd166', -8);
         }
         ctx.restore();
       }

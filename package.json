@@ -1,0 +1,10 @@
+{
+  "name": "iiser-vithura-shuttle",
+  "version": "1.0.0",
+  "private": true,
+  "description": "3D IISER Vithura campus shuttle driving game (static Three.js, no build step).",
+  "scripts": {
+    "test": "node --test test/"
+  },
+  "license": "MIT"
+}

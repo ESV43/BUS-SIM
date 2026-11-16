@@ -771,3 +771,33 @@ body.shuttle-active .title-card{opacity:0;pointer-events:none;transition:opacity
   .passenger-card .passenger-label{display:none}
 }
 
+
+/* ---------- Ride grade, landmark log and photo mode ---------- */
+.sh-ride-pill{font-size:9.5px;font-weight:800;letter-spacing:.05em;padding:2px 7px;border-radius:999px;
+  border:1px solid var(--line-soft);background:rgba(255,255,255,.05);color:var(--muted);
+  font-variant-numeric:tabular-nums;line-height:1.5}
+.sh-ride-pill[data-grade="S"]{color:#3be8b0;border-color:rgba(59,232,176,.55);background:rgba(59,232,176,.14)}
+.sh-ride-pill[data-grade="A"]{color:#ffc857;border-color:rgba(255,200,87,.5);background:rgba(255,200,87,.12)}
+.sh-ride-pill[data-grade="B"]{color:#9cd0ff;border-color:rgba(74,168,255,.5);background:rgba(74,168,255,.12)}
+.sh-ride-pill[data-grade="C"]{color:#ffb020;border-color:rgba(255,176,32,.5);background:rgba(255,176,32,.12)}
+.sh-ride-pill[data-grade="D"]{color:#ff8a80;border-color:rgba(235,64,52,.5);background:rgba(235,64,52,.14)}
+.sh-discovered{margin:8px 0 0;padding:7px 10px;border-radius:8px;background:rgba(227,162,91,.08);
+  border:1px solid rgba(227,162,91,.28);font-size:10.5px;color:#f0dcc0;line-height:1.4}
+.sh-discovered strong{color:#ffc857;font-weight:700;font-variant-numeric:tabular-nums}
+.photo-bar{position:fixed;z-index:45;top:18px;left:50%;transform:translateX(-50%);
+  display:flex;align-items:center;gap:9px;padding:8px 12px;border-radius:12px;
+  background:rgba(9,15,13,.88);border:1px solid var(--line);color:#f4efe3;font-size:11px;
+  box-shadow:0 12px 30px rgba(0,0,0,.45);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
+.photo-bar.hidden{display:none}
+.photo-bar .photo-title{font-weight:800;letter-spacing:.1em;text-transform:uppercase;font-size:10px;color:#3be8b0}
+.photo-bar .photo-hint{color:var(--faint);font-size:10.5px}
+.photo-bar .btn{padding:5px 10px;font-size:10.5px}
+body.photo-mode #panel,body.photo-mode #minimap-card,body.photo-mode .title-card,
+body.photo-mode .shuttle-hud,body.photo-mode .mode-strip,body.photo-mode .cam-strip,
+body.photo-mode .touch-controls,body.photo-mode .mp-board,body.photo-mode .chase-panel,
+body.photo-mode .mp-nametag-layer{display:none!important}
+body.photo-mode canvas{touch-action:none}
+@media (pointer:coarse) and (max-width:760px){
+  .photo-bar{top:auto;bottom:calc(14px + env(safe-area-inset-bottom,0px));gap:6px;padding:6px 9px}
+  .photo-bar .photo-hint{display:none}
+}

@@ -18,7 +18,7 @@
   <h1>Shuttle &amp; Buggy</h1>
   <p class="subtitle">Drive a real-scale Western Ghats campus — shuttle routes, buggy trails and multiplayer cruises</p>
   <div class="meta-line">
-    <span>6 game modes</span><span>8-player co-op</span><span>GLB fleet</span>
+    <span>7 game modes</span><span>8-player co-op</span><span>GLB fleet</span>
   </div>
 </header>
 
@@ -261,7 +261,7 @@
     <h3>Accuracy</h3>
     <p>Footprints and positions are real map geometry. Building heights, floors and roof forms are estimates derived from OSM tags, footprint dimensions and the satellite view; the terrain is a smoothed 30 m elevation model. This is not a survey product and should not be used for navigation or planning.</p>
     <h3>Controls</h3>
-    <p><strong>Drive:</strong> <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> or arrow keys · <kbd>Space</kbd> handbrake · <kbd>C</kbd> camera · <kbd>1</kbd>–<kbd>7</kbd> camera views · <kbd>H</kbd> horn · <kbd>F</kbd> lights · <kbd>G</kbd> high beam · <kbd>B</kbd> hazards · <kbd>R</kbd> reset · <kbd>M</kbd> next mode · <kbd>Esc</kbd> exit vehicle.</p>
+    <p><strong>Drive:</strong> <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> or arrow keys · <kbd>Space</kbd> handbrake · <kbd>C</kbd> camera · <kbd>1</kbd>–<kbd>7</kbd> camera views · <kbd>H</kbd> horn · <kbd>F</kbd> lights · <kbd>G</kbd> high beam · <kbd>B</kbd> hazards · <kbd>R</kbd> reset · <kbd>M</kbd> next mode · <kbd>P</kbd> photo mode · <kbd>Esc</kbd> exit vehicle.</p>
     <p><strong>Map:</strong> drag to orbit, right-drag (or shift-drag) to pan, scroll to zoom. Click a building for details. <kbd>L</kbd> labels · <kbd>T</kbd> trees · <kbd>B</kbd> boundary · <kbd>Z</kbd>/<kbd>X</kbd> time of day · <kbd>R</kbd> overview.</p>
     <p><strong>Multiplayer:</strong> the host chooses <em>Create room</em> first and shares the code; friends enter that code and choose <em>Join room</em>. Everyone in the room sees each other's vehicles. Every mode is playable in a room; the scoreboard tracks drivers per mode.</p>
     <p class="credit-fine">Unofficial visualization, October 2026. OpenStreetMap snapshot 31 October 2026; Esri imagery and AWS terrain tiles retrieved 31 October 2026. Imagery remains the property of its providers.</p>
@@ -307,7 +307,8 @@
       </section>
     </div>
     <h3>Quick controls</h3>
-    <p><kbd>H</kbd> horn · <kbd>F</kbd> lights · <kbd>G</kbd> high beam · <kbd>B</kbd> hazards · <kbd>R</kbd> reset · <kbd>M</kbd> next mode · <kbd>N</kbd> map · <kbd>Esc</kbd> exit vehicle.</p>
+    <p><kbd>H</kbd> horn · <kbd>F</kbd> lights · <kbd>G</kbd> high beam · <kbd>B</kbd> hazards · <kbd>R</kbd> reset · <kbd>M</kbd> next mode · <kbd>N</kbd> map · <kbd>P</kbd> photo mode · <kbd>Esc</kbd> exit vehicle.</p>
+    <p><strong>Ride grade:</strong> each run is rated S–D on the HUD for smoothness — hard braking, sharp turns, fines and bumps all cost points. Switch to the <em>Night shift</em> from the session panel for a 50% fare allowance, and roll slowly past campus landmarks to log them on your checklist.</p>
     <div class="howto-actions">
       <button class="btn primary" id="howto-start" type="button">Start driving</button>
       <button class="btn" id="howto-gotit" type="button">Got it</button>
@@ -325,6 +326,7 @@
 <script src="js/campus-landmarks.js?v=2026-11-13"></script>
 <script src="js/unreal-fx.js?v=2026-11-13"></script>
 <script src="js/app.js?v=2026-11-13"></script>
+<script src="js/game-logic.js?v=2026-11-13"></script>
 <script src="js/shuttle-game.js?v=2026-11-13"></script>
 </body>
 </html>
